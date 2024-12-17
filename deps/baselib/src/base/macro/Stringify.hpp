@@ -1,0 +1,4 @@
+#pragma once
+
+#define BASE_STRINGIFY_INTERNAL(s) #s
+#define STRINGIFY(s) BASE_STRINGIFY_INTERNAL(s)

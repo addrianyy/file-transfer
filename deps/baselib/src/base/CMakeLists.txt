@@ -1,0 +1,30 @@
+add_subdirectory(concurrency)
+add_subdirectory(containers)
+add_subdirectory(hash)
+add_subdirectory(rng)
+add_subdirectory(time)
+add_subdirectory(macro)
+add_subdirectory(io)
+add_subdirectory(text)
+add_subdirectory(logger)
+
+target_sources(baselib PRIVATE
+    Panic.cpp
+    Panic.hpp
+    PanicHook.cpp
+    PanicHook.hpp
+    Initialization.cpp
+    Initialization.hpp
+    Log.cpp
+    Log.hpp
+    Platform.cpp
+    Platform.hpp
+    Iterator.cpp
+    Iterator.hpp
+    Deferred.hpp
+    Deferred.cpp
+    Casting.hpp
+    Casting.cpp
+    Overload.cpp
+    Overload.hpp
+)

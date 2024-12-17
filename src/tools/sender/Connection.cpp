@@ -1,0 +1,218 @@
+#include "Connection.hpp"
+
+#include <base/Log.hpp>
+#include <base/time/PreciseTime.hpp>
+
+#include <helpers/SizeFormatter.hpp>
+
+namespace sender {
+
+void Connection::on_error(ErrorType type, sock::Status status) {
+  log_error("error - {}", status.stringify());
+}
+void Connection::on_protocol_error(std::string_view description) {
+  log_error("error - {}", description);
+}
+void Connection::on_disconnected() {
+  if (state == State::Finished) {
+    log_info("disconnected");
+  } else {
+    log_warn("disconnected unexpectedly");
+  }
+}
+
+void Connection::create_directory(std::string_view virtual_path) {
+  log_info("creating directory `{}`...", virtual_path);
+
+  if (send_packet(net::packets::CreateDirectory{.path = virtual_path})) {
+    state = State::WaitingForDirectoryCreationAcknowledgement;
+  }
+}
+
+void Connection::start_file_upload(std::string_view virtual_path, const std::string& fs_path) {
+  log_info("uploading file `{}`...", virtual_path);
+
+  base::File file{fs_path, "rb"};
+  if (!file) {
+    return protocol_error(base::format("failed to open file `{}` for reading", fs_path));
+  }
+
+  file.seek(base::File::SeekOrigin::End, 0);
+  const auto total_file_size = uint64_t(file.tell());
+  file.seek(base::File::SeekOrigin::Set, 0);
+
+  if (!send_packet(net::packets::CreateFile{.path = virtual_path, .size = total_file_size})) {
+    return;
+  }
+
+  state = State::WaitingForFileCreationAcknowledgement;
+  upload = Upload{
+    .file = std::move(file),
+    .virtual_path = std::string(virtual_path),
+    .fs_path = fs_path,
+    .file_size = total_file_size,
+  };
+}
+
+void Connection::upload_accepted_file() {
+  auto& up = *upload;
+
+  const auto upload_start_time = base::PreciseTime::now();
+  auto last_report_time = base::PreciseTime::now();
+
+  uint64_t total_bytes_read = 0;
+  while (total_bytes_read < up.file_size) {
+    const auto read_size = up.file.read(chunk_buffer.data(), chunk_buffer.size());
+    total_bytes_read += read_size;
+
+    if (read_size < chunk_buffer.size() && total_bytes_read != up.file_size) {
+      return protocol_error(base::format("failed to read file: `{}`", up.fs_path));
+    }
+
+    const auto chunk = std::span(chunk_buffer).subspan(0, read_size);
+    if (!send_packet(net::packets::FileChunk{.data = chunk})) {
+      return;
+    }
+
+    const auto now = base::PreciseTime::now();
+    if (now - last_report_time > base::PreciseTime::from_seconds(1.f)) {
+      const auto total_bytes_uploaded = total_bytes_read;
+
+      const auto [uploaded_size, uploaded_size_units] =
+        SizeFormatter::bytes_to_readable_units(total_bytes_uploaded);
+      const auto [total_size, total_size_units] =
+        SizeFormatter::bytes_to_readable_units(up.file_size);
+
+      const auto upload_speed = float(up.file_size) / (now - upload_start_time).seconds();
+      const auto [readable_speed, speed_units] =
+        SizeFormatter::bytes_to_readable_units(uint64_t(upload_speed));
+
+      log_info("`{}`: {:.1f}% - {:.2f}{}/{:.2f}{} - {:.2f} {}/s", up.virtual_path,
+               (float(total_bytes_uploaded) / float(up.file_size)) * 100.f, uploaded_size,
+               uploaded_size_units, total_size, total_size_units, readable_speed, speed_units);
+
+      last_report_time = now;
+    }
+  }
+
+  if (!send_packet(net::packets::Acknowledged{.accepted = true})) {
+    return;
+  }
+
+  state = State::WaitingForUploadAcknowledgement;
+  upload = {};
+}
+
+void Connection::process_send_entry(size_t index) {
+  if (index >= send_entries.size()) {
+    state = State::Finished;
+    set_not_alive();
+  } else {
+    const auto& entry = send_entries[index];
+    if (entry.type == FileListing::Type::Directory) {
+      create_directory(entry.relative_path);
+    } else {
+      start_file_upload(entry.relative_path, entry.absolute_path);
+    }
+  }
+}
+
+void Connection::process_first_send_entry() {
+  process_send_entry(current_send_entry);
+}
+
+void Connection::process_next_send_entry() {
+  current_send_entry++;
+  process_send_entry(current_send_entry);
+}
+
+void Connection::on_handshake_finished() {
+  process_first_send_entry();
+}
+void Connection::on_directory_creation_accepted() {
+  state = State::Idle;
+  process_next_send_entry();
+}
+void Connection::on_file_creation_accepted() {
+  upload_accepted_file();
+}
+void Connection::on_upload_accepted() {
+  log_info("uploaded file!");
+  state = State::Idle;
+  process_next_send_entry();
+}
+
+void Connection::on_packet_received(const net::packets::ReceiverHello& packet) {
+  if (state == State::WaitingForHello) {
+    state = State::Idle;
+    on_handshake_finished();
+  } else {
+    protocol_error("received unexpected ReceiverHello packet");
+  }
+}
+
+void Connection::on_packet_received(const net::packets::SenderHello& packet) {
+  protocol_error("received unexpected SenderHello packet");
+}
+
+void Connection::on_packet_received(const net::packets::Acknowledged& packet) {
+  switch (state) {
+    case State::WaitingForDirectoryCreationAcknowledgement: {
+      if (packet.accepted) {
+        on_directory_creation_accepted();
+      } else {
+        protocol_error("server creation the directory creation request");
+      }
+      break;
+    }
+
+    case State::WaitingForFileCreationAcknowledgement: {
+      if (packet.accepted) {
+        on_file_creation_accepted();
+      } else {
+        protocol_error("server rejected the file creation request");
+      }
+      break;
+    }
+
+    case State::WaitingForUploadAcknowledgement: {
+      if (packet.accepted) {
+        on_upload_accepted();
+      } else {
+        protocol_error("server rejected the file upload");
+      }
+      break;
+    }
+
+    default: {
+      protocol_error("received unexpected Acknowledged packet");
+      break;
+    }
+  }
+}
+
+void Connection::on_packet_received(const net::packets::CreateDirectory& packet) {
+  protocol_error("received unexpected CreateDirectory packet");
+}
+void Connection::on_packet_received(const net::packets::CreateFile& packet) {
+  protocol_error("received unexpected CreateFile packet");
+}
+void Connection::on_packet_received(const net::packets::FileChunk& packet) {
+  protocol_error("received unexpected FileChunk packet");
+}
+
+Connection::Connection(std::unique_ptr<sock::SocketStream> socket,
+                       std::vector<FileListing::Entry> send_entries)
+    : net::ProtocolConnection(std::move(socket)), send_entries(std::move(send_entries)) {
+  chunk_buffer.resize(receive_buffer_size / 2 + receive_buffer_size / 4);
+}
+
+void Connection::start() {
+  send_packet(net::packets::SenderHello{});
+}
+
+bool Connection::finished() const {
+  return state == State::Finished;
+}
+
+}  // namespace sender
