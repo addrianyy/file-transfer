@@ -1,4 +1,4 @@
 ## File transfer
 
-- `ft receive [port?]`
+- `ft receive [target directory] [port?]`
 - `ft send [host:port?] [file/directory] [file/directory] ...`
