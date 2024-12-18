@@ -42,11 +42,6 @@ constexpr RawSocket invalid_raw_socket = -1;
 }  // namespace detail
 
 struct IpResolver {
-  enum class IpVersion {
-    V4,
-    V6,
-  };
-
   struct ResolveIpV4Result {
     Status status{};
     IpV4Address address{};
@@ -117,7 +112,7 @@ class SocketDatagram : public detail::RwSocketBase {
     const SocketAddress& address,
     const BindParameters& bind_parameters = BindParameters::default_parameters());
   [[nodiscard]] static BindResult bind(
-    IpResolver::IpVersion ip_version,
+    IpVersion ip_version,
     const std::string& hostname,
     uint16_t port,
     const BindParameters& bind_parameters = BindParameters::default_parameters());
@@ -179,7 +174,7 @@ class SocketStream : public detail::RwSocketBase {
     const SocketAddress& address,
     const ConnectParameters& connect_parameters = ConnectParameters::default_parameters());
   [[nodiscard]] static ConnectResult connect(
-    IpResolver::IpVersion ip_version,
+    IpVersion ip_version,
     const std::string& hostname,
     uint16_t port,
     const ConnectParameters& connect_parameters = ConnectParameters::default_parameters());
@@ -228,7 +223,7 @@ class Listener : public SocketBase {
     const SocketAddress& address,
     const BindParameters& bind_parameters = BindParameters::default_parameters());
   [[nodiscard]] static BindResult bind(
-    IpResolver::IpVersion ip_version,
+    IpVersion ip_version,
     const std::string& hostname,
     uint16_t port,
     const BindParameters& bind_parameters = BindParameters::default_parameters());

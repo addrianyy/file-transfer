@@ -3,6 +3,8 @@
 
 #include <socklib/Socket.hpp>
 
+#include <tools/Ip.hpp>
+
 #include <net/Port.hpp>
 
 #include <base/Log.hpp>
@@ -41,7 +43,7 @@ bool tools::sender::run(std::span<const std::string_view> args) {
   log_info("number of entries to send: {}", send_entries.size());
 
   auto [connect_status, connection_socket] =
-    sock::SocketStream::connect(sock::IpResolver::IpVersion::V6, std::string(address), port);
+    sock::SocketStream::connect(tools::IpAddress::Version, std::string(address), port);
   if (!connect_status) {
     log_error("failed to connect to `{}`: {}", full_address, connect_status.stringify());
     return false;

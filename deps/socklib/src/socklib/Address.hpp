@@ -5,10 +5,17 @@
 
 namespace sock {
 
+enum class IpVersion {
+  V4,
+  V6,
+};
+
 class IpV4Address {
   std::array<uint8_t, 4> components_{};
 
  public:
+  constexpr static IpVersion Version = IpVersion::V4;
+
   constexpr static IpV4Address unspecified() { return IpV4Address{{0, 0, 0, 0}}; }
   constexpr static IpV4Address loopback() { return IpV4Address{{127, 0, 0, 1}}; }
   constexpr static IpV4Address broadcast() { return IpV4Address{{255, 255, 255, 255}}; }
@@ -25,6 +32,8 @@ class IpV6Address {
   std::array<uint16_t, 8> components_{};
 
  public:
+  constexpr static IpVersion Version = IpVersion::V6;
+
   constexpr static IpV6Address unspecified() { return IpV6Address{{0, 0, 0, 0, 0, 0, 0}}; }
   constexpr static IpV6Address loopback() { return IpV6Address{{0, 0, 0, 0, 0, 0, 0, 1}}; }
   constexpr static IpV6Address mapped_to_ipv4(const IpV4Address& ipv4_address) {
@@ -78,6 +87,9 @@ class SocketIpV4Address : public SocketAddress {
   uint16_t port_{};
 
  public:
+  using Ip = IpV4Address;
+  constexpr static IpVersion Version = Ip::Version;
+
   constexpr SocketIpV4Address() : SocketAddress(Type::IpV4) {}
   constexpr SocketIpV4Address(const IpV4Address& ip, uint16_t port)
       : SocketAddress(Type::IpV4), ip_(ip), port_(port) {}
@@ -101,6 +113,9 @@ class SocketIpV6Address : public SocketAddress {
   uint16_t port_{};
 
  public:
+  using Ip = IpV6Address;
+  constexpr static IpVersion Version = Ip::Version;
+
   constexpr SocketIpV6Address() : SocketAddress(Type::IpV6) {}
   constexpr SocketIpV6Address(const IpV6Address& ip, uint16_t port)
       : SocketAddress(Type::IpV6), ip_(ip), port_(port) {}

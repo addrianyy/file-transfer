@@ -2,8 +2,6 @@
 
 #include <base/Log.hpp>
 
-#include <helpers/IpAddressFormatter.hpp>
-
 #include <filesystem>
 
 namespace receiver {
@@ -176,10 +174,10 @@ void Connection::on_packet_received(const net::packets::FileChunk& packet) {
 }
 
 Connection::Connection(std::unique_ptr<sock::SocketStream> socket,
-                       const sock::IpV6Address& peer_address,
+                       std::string peer_address,
                        std::string receive_directory)
     : net::ProtocolConnection(std::move(socket)),
-      peer_address(IpAddressFormatter::format(peer_address)),
+      peer_address(std::move(peer_address)),
       receive_directory(std::move(receive_directory)),
       download_tracker("downloading", [this](std::string_view message) {
         log_info("{}: {}", this->peer_address, message);

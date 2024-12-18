@@ -3,6 +3,8 @@
 
 #include <socklib/Socket.hpp>
 
+#include <tools/Ip.hpp>
+
 #include <helpers/IpAddressFormatter.hpp>
 #include <net/Port.hpp>
 
@@ -38,7 +40,7 @@ bool tools::reciever::run(std::span<const std::string_view> args) {
   }
 
   const auto [bind_status, listener] =
-    sock::Listener::bind(sock::SocketIpV6Address(sock::IpV6Address::unspecified(), port));
+    sock::Listener::bind(tools::SocketIpAddress(tools::IpAddress::unspecified(), port));
   if (!bind_status) {
     log_error("failed to bind receiver to port {}: {}", port, bind_status.stringify());
     return false;
@@ -47,21 +49,21 @@ bool tools::reciever::run(std::span<const std::string_view> args) {
   log_info("listening at port {}...", port);
 
   while (true) {
-    sock::SocketIpV6Address peer_address;
+    tools::SocketIpAddress peer_address;
 
     auto [accept_status, connection_socket] = listener->accept(&peer_address);
     if (!accept_status) {
-      log_warn("failed to accept client {}: {}", IpAddressFormatter::format(peer_address.ip()),
-               accept_status.stringify());
+      log_warn("failed to accept client: {}", accept_status.stringify());
       continue;
     }
 
-    log_info("client {} connected", IpAddressFormatter::format(peer_address.ip()));
+    const auto peer_ip = IpAddressFormatter::format(peer_address.ip());
 
-    std::thread{[connection_socket = std::move(connection_socket), peer_address,
+    log_info("client {} connected", peer_ip);
+
+    std::thread{[connection_socket = std::move(connection_socket), peer_ip,
                  receive_directory]() mutable {
-      ::receiver::Connection connection{std::move(connection_socket), peer_address.ip(),
-                                        receive_directory};
+      ::receiver::Connection connection{std::move(connection_socket), peer_ip, receive_directory};
 
       while (connection.alive()) {
         connection.update();

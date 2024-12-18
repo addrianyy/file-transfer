@@ -54,7 +54,7 @@ class Connection : public net::ProtocolConnection {
 
  public:
   explicit Connection(std::unique_ptr<sock::SocketStream> socket,
-                      const sock::IpV6Address& peer_address,
+                      std::string peer_address,
                       std::string receive_directory);
 };
 

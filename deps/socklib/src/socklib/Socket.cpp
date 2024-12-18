@@ -401,12 +401,12 @@ sock::IpResolver::ResolveIpV6Result sock::IpResolver::resolve_ipv6(const std::st
 }
 
 template <typename Result, typename Fn>
-static Result resolve_and_run(sock::IpResolver::IpVersion ip_version,
+static Result resolve_and_run(sock::IpVersion ip_version,
                               const std::string& hostname,
                               uint16_t port,
                               Fn&& callback) {
   switch (ip_version) {
-    case sock::IpResolver::IpVersion::V4: {
+    case sock::IpVersion::V4: {
       const auto resolved = sock::IpResolver::resolve_ipv4(hostname);
       if (!resolved) {
         return {
@@ -415,7 +415,7 @@ static Result resolve_and_run(sock::IpResolver::IpVersion ip_version,
       }
       return callback(sock::SocketIpV4Address(resolved.address, port));
     }
-    case sock::IpResolver::IpVersion::V6: {
+    case sock::IpVersion::V6: {
       const auto resolved = sock::IpResolver::resolve_ipv6(hostname);
       if (!resolved) {
         return {
@@ -502,7 +502,7 @@ sock::SocketDatagram::BindResult sock::SocketDatagram::bind(const SocketAddress&
   };
 }
 
-sock::SocketDatagram::BindResult sock::SocketDatagram::bind(IpResolver::IpVersion ip_version,
+sock::SocketDatagram::BindResult sock::SocketDatagram::bind(IpVersion ip_version,
                                                             const std::string& hostname,
                                                             uint16_t port,
                                                             const BindParameters& bind_parameters) {
@@ -678,7 +678,7 @@ sock::SocketStream::ConnectResult sock::SocketStream::connect(
 }
 
 sock::SocketStream::ConnectResult sock::SocketStream::connect(
-  IpResolver::IpVersion ip_version,
+  IpVersion ip_version,
   const std::string& hostname,
   uint16_t port,
   const ConnectParameters& connect_parameters) {
@@ -816,7 +816,7 @@ sock::Listener::BindResult sock::Listener::bind(const SocketAddress& address,
   };
 }
 
-sock::Listener::BindResult sock::Listener::bind(IpResolver::IpVersion ip_version,
+sock::Listener::BindResult sock::Listener::bind(IpVersion ip_version,
                                                 const std::string& hostname,
                                                 uint16_t port,
                                                 const BindParameters& bind_parameters) {
