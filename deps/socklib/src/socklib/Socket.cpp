@@ -352,13 +352,15 @@ static sock::Status setup_socket(sock::detail::RawSocket socket,
 
 template <typename TResult, typename TAddress>
 static TResult resolve_ip_generic(int family, const std::string& hostname) {
-  addrinfo hints{};
   addrinfo* resolved{};
+  addrinfo hints{};
 
   hints.ai_family = family;
+  hints.ai_flags = AI_V4MAPPED | AI_ADDRCONFIG;
 
   // Different return value semantics, check if != 0.
-  if (::getaddrinfo(hostname.c_str(), nullptr, &hints, &resolved) != 0) {
+  const auto addrinfo_result = ::getaddrinfo(hostname.c_str(), nullptr, &hints, &resolved);
+  if (addrinfo_result != 0) {
     return {
       .status = {sock::ErrorCode::HostnameNotFound},
     };

@@ -29,5 +29,5 @@ void FileListing::add(const std::string& path) {
   verify(std::filesystem::exists(path), "path `{}` does not exist", path);
 
   const auto full_path = std::filesystem::canonical(path);
-  process_file(std::filesystem::path(full_path).filename().string(), full_path, entries_);
+  process_file(std::filesystem::path(full_path).filename().string(), full_path.string(), entries_);
 }
