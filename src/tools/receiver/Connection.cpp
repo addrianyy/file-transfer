@@ -1,8 +1,11 @@
 #include "Connection.hpp"
 
 #include <base/Log.hpp>
+#include <base/io/TerminalColors.hpp>
 
 #include <filesystem>
+
+#define TERMINAL_COLOR_IP(x) TERMINAL_COLOR_GREEN(x)
 
 namespace receiver {
 
@@ -14,24 +17,24 @@ void Connection::cleanup() {
     std::error_code ec;
     std::filesystem::remove(path, ec);
 
-    log_warn("{}: removing `{}`", peer_address, path);
+    log_error("{}: removing `{}`", peer_address, path);
   }
 }
 
 void Connection::on_error(ErrorType type, sock::Status status) {
   cleanup();
-  log_warn("{}: error - {}", peer_address, status.stringify());
+  log_error("{}: error - {}", peer_address, status.stringify());
 }
 void Connection::on_protocol_error(std::string_view description) {
   cleanup();
-  log_warn("{}: error - {}", peer_address, description);
+  log_error("{}: error - {}", peer_address, description);
 }
 void Connection::on_disconnected() {
   cleanup();
   if (state != State::Idle) {
-    log_warn("{}: disconnected unexpectedly", peer_address);
+    log_error("{}: disconnected unexpectedly", peer_address);
   } else {
-    log_info("{}: disconnected", peer_address);
+    log_info(TERMINAL_COLOR_IP("{}") ": disconnected", peer_address);
   }
 }
 
@@ -59,7 +62,7 @@ bool Connection::create_directory(std::string_view virtual_path) {
   std::error_code ec;
   std::filesystem::create_directories(fs_path, ec);
   if (ec == std::errc{}) {
-    log_info("{}: created directory `{}`", peer_address, virtual_path);
+    log_info(TERMINAL_COLOR_IP("{}") ": created directory `{}`", peer_address, virtual_path);
     return true;
   } else {
     protocol_error(base::format("failed to create directory `{}`", fs_path));
@@ -212,7 +215,7 @@ Connection::Connection(std::unique_ptr<sock::SocketStream> socket,
       peer_address(std::move(peer_address)),
       receive_directory(std::move(receive_directory)),
       download_tracker("downloading", [this](std::string_view message) {
-        log_info("{}: {}", this->peer_address, message);
+        log_info(TERMINAL_COLOR_IP("{}") ": {}", this->peer_address, message);
       }) {}
 
 }  // namespace receiver

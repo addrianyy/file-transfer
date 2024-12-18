@@ -15,7 +15,7 @@ void Connection::on_disconnected() {
   if (state == State::Finished) {
     log_info("disconnected");
   } else {
-    log_warn("disconnected unexpectedly");
+    log_error("disconnected unexpectedly");
   }
 }
 
@@ -124,7 +124,6 @@ void Connection::on_file_creation_accepted() {
   upload_accepted_file();
 }
 void Connection::on_upload_accepted() {
-  log_info("uploaded file!");
   state = State::Idle;
   process_next_send_entry();
 }

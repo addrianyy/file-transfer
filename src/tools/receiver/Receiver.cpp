@@ -70,7 +70,7 @@ bool tools::reciever::run(std::span<const std::string_view> args) {
 
     auto [accept_status, connection_socket] = listener->accept(&peer_address);
     if (!accept_status) {
-      log_warn("failed to accept client: {}", accept_status.stringify());
+      log_error("failed to accept client: {}", accept_status.stringify());
       continue;
     }
 
