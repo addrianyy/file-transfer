@@ -51,7 +51,7 @@ class Connection {
   virtual void on_packet_received(BinaryReader reader) = 0;
 
  public:
-  constexpr static size_t receive_buffer_size = 32 * 1024;
+  constexpr static size_t receive_buffer_size = 64 * 1024;
 
   explicit Connection(std::unique_ptr<sock::SocketStream> socket);
   virtual ~Connection() = default;
