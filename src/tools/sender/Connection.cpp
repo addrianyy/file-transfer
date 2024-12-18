@@ -1,6 +1,7 @@
 #include "Connection.hpp"
 
 #include <base/Log.hpp>
+#include <base/Panic.hpp>
 
 namespace sender {
 
@@ -36,6 +37,7 @@ void Connection::start_file_upload(std::string_view virtual_path, const std::str
 
   file.seek(base::File::SeekOrigin::End, 0);
   const auto total_file_size = uint64_t(file.tell());
+  verify(total_file_size >= 0, "total file size is negative");
   file.seek(base::File::SeekOrigin::Set, 0);
 
   if (!send_packet(net::packets::CreateFile{.path = virtual_path, .size = total_file_size})) {

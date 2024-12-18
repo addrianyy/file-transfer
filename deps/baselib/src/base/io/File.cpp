@@ -1,7 +1,8 @@
 #define _CRT_SECURE_NO_WARNINGS
 
-#include <base/io/File.hpp>
 #include <base/Panic.hpp>
+#include <base/Platform.hpp>
+#include <base/io/File.hpp>
 
 #include <cstdio>
 
@@ -99,7 +100,11 @@ bool File::eof() const {
 }
 
 int64_t File::tell() const {
+#ifdef PLATFORM_WINDOWS
+  return _ftelli64(fp);
+#else
   return std::ftell(fp);
+#endif
 }
 
 void File::seek(SeekOrigin origin, int64_t offset) {
@@ -118,7 +123,11 @@ void File::seek(SeekOrigin origin, int64_t offset) {
       break;
   }
 
+#ifdef PLATFORM_WINDOWS
+  _fseeki64(fp, offset, c_origin);
+#else
   std::fseek(fp, offset, c_origin);
+#endif
 }
 
 void File::flush() {
