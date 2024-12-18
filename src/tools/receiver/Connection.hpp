@@ -36,6 +36,7 @@ class Connection : public net::ProtocolConnection {
   TransferTracker download_tracker;
 
  protected:
+  void cleanup();
   void on_error(ErrorType type, sock::Status status) override;
   void on_protocol_error(std::string_view description) override;
   void on_disconnected() override;

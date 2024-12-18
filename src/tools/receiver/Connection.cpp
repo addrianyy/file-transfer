@@ -6,13 +6,28 @@
 
 namespace receiver {
 
+void Connection::cleanup() {
+  if (download) {
+    const auto path = download->fs_path;
+    download = {};
+
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+
+    log_warn("{}: removing `{}`", peer_address, path);
+  }
+}
+
 void Connection::on_error(ErrorType type, sock::Status status) {
+  cleanup();
   log_warn("{}: error - {}", peer_address, status.stringify());
 }
 void Connection::on_protocol_error(std::string_view description) {
+  cleanup();
   log_warn("{}: error - {}", peer_address, description);
 }
 void Connection::on_disconnected() {
+  cleanup();
   if (state != State::Idle) {
     log_warn("{}: disconnected unexpectedly", peer_address);
   } else {
