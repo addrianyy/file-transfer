@@ -11,6 +11,9 @@
 #include <base/Log.hpp>
 #include <base/text/Parsing.hpp>
 
+#include <fmt/chrono.h>
+
+#include <ctime>
 #include <filesystem>
 #include <thread>
 
@@ -29,7 +32,28 @@ bool tools::reciever::run(std::span<const std::string_view> args) {
     }
   }
 
-  const std::string receive_directory = "received";
+  const auto [bind_status, listener] =
+    sock::Listener::bind(tools::SocketIpAddress(tools::IpAddress::unspecified(), port));
+  if (!bind_status) {
+    log_error("failed to bind receiver to port {}: {}", port, bind_status.stringify());
+    return false;
+  }
+
+  log_info("listening at port {}...", port);
+
+  std::string receive_directory;
+
+#if 1
+  {
+    const std::time_t t = std::time(nullptr);
+    receive_directory = base::format("receive_{:%d.%m.%Y_%H:%M:%S}", fmt::localtime(t));
+  }
+#else
+  {
+    receive_directory = "received";
+  }
+#endif
+
   if (!std::filesystem::exists(receive_directory)) {
     std::error_code ec{};
     std::filesystem::create_directories(receive_directory, ec);
@@ -39,14 +63,7 @@ bool tools::reciever::run(std::span<const std::string_view> args) {
     }
   }
 
-  const auto [bind_status, listener] =
-    sock::Listener::bind(tools::SocketIpAddress(tools::IpAddress::unspecified(), port));
-  if (!bind_status) {
-    log_error("failed to bind receiver to port {}: {}", port, bind_status.stringify());
-    return false;
-  }
-
-  log_info("listening at port {}...", port);
+  log_info("receiving to `{}`", receive_directory);
 
   while (true) {
     tools::SocketIpAddress peer_address;
