@@ -146,7 +146,7 @@ static bool socket_address_convert_from_raw(const sockaddr* sockaddr_buffer,
 #elif defined(SOCKLIB_APPLE)
         components[i] = ntohs(source->sin6_addr.__u6_addr.__u6_addr16[i]);
 #else
-        components[i] = ntohs(reinterpret_cast<const uint16_t*>(source->sin6_addr.u6_addr[i]));
+        components[i] = ntohs(reinterpret_cast<const uint16_t*>(source->sin6_addr.s6_addr)[i]);
 #endif
       }
 
