@@ -6,6 +6,12 @@
 
 #if defined(_WIN32)
 #define SOCKLIB_WINDOWS
+#elif defined(__linux__)
+#define SOCKLIB_LINUX
+#elif defined(__APPLE__)
+#define SOCKLIB_APPLE
+#else
+#error "Unsupported platform"
 #endif
 
 #if defined(SOCKLIB_WINDOWS)
@@ -23,6 +29,10 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#endif
+
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
 #endif
 
 struct SockaddrBuffer {
@@ -84,8 +94,10 @@ static void socket_address_convert_to_raw(const sock::SocketAddress& address, Fn
       for (size_t i = 0; i < 8; ++i) {
 #if defined(SOCKLIB_WINDOWS)
         sockaddr_in6.sin6_addr.u.Word[i] = htons(components[i]);
-#else
+#elif defined(SOCKLIB_APPLE)
         sockaddr_in6.sin6_addr.__u6_addr.__u6_addr16[i] = htons(components[i]);
+#else
+        reinterpret_cast<uint16_t*>(sockaddr_in6.sin6_addr.s6_addr)[i] = htons(components[i]);
 #endif
       }
 
@@ -131,8 +143,10 @@ static bool socket_address_convert_from_raw(const sockaddr* sockaddr_buffer,
       for (size_t i = 0; i < 8; ++i) {
 #if defined(SOCKLIB_WINDOWS)
         components[i] = ntohs(source->sin6_addr.u.Word[i]);
-#else
+#elif defined(SOCKLIB_APPLE)
         components[i] = ntohs(source->sin6_addr.__u6_addr.__u6_addr16[i]);
+#else
+        components[i] = ntohs(reinterpret_cast<const uint16_t*>(source->sin6_addr.u6_addr[i]));
 #endif
       }
 
@@ -334,11 +348,6 @@ static sock::Status setup_socket(sock::detail::RawSocket socket,
     if (!status) {
       return {sock::ErrorCode::SocketSetupFailed, status.error};
     }
-  }
-
-  status = set_socket_option<int>(socket, SOL_SOCKET, SO_NOSIGPIPE, 1);
-  if (!status) {
-    return {sock::ErrorCode::SocketSetupFailed, status.error};
   }
 #endif
 
@@ -551,7 +560,7 @@ sock::SocketDatagram::SendReceiveResult sock::SocketDatagram::send(const SocketA
   intptr_t result{default_error_value};
   socket_address_convert_to_raw(to, [&](const sockaddr* socket_address, socklen_t sockaddr_size) {
     result = handle_eintr([&] {
-      return ::sendto(raw_socket_, reinterpret_cast<const char*>(data), data_size, 0,
+      return ::sendto(raw_socket_, reinterpret_cast<const char*>(data), data_size, MSG_NOSIGNAL,
                       socket_address, sockaddr_size);
     });
   });
@@ -699,8 +708,9 @@ sock::SocketStream::SendReceiveResult sock::SocketStream::send(const void* data,
     };
   }
 
-  const auto result = handle_eintr(
-    [&] { return ::send(raw_socket_, reinterpret_cast<const char*>(data), data_size, 0); });
+  const auto result = handle_eintr([&] {
+    return ::send(raw_socket_, reinterpret_cast<const char*>(data), data_size, MSG_NOSIGNAL);
+  });
   if (result == 0) {
     return {
       .status = Status{ErrorCode::SendFailed, ErrorCode::Disconnected},
