@@ -3,4 +3,6 @@ target_sources(ft PUBLIC
     IpAddressFormatter.hpp
     SizeFormatter.cpp
     SizeFormatter.hpp
+    TransferTracker.cpp
+    TransferTracker.hpp
 )

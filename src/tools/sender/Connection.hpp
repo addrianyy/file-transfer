@@ -3,6 +3,8 @@
 
 #include <net/protocol/ProtocolConnection.hpp>
 
+#include <helpers/TransferTracker.hpp>
+
 #include <base/io/File.hpp>
 
 #include <vector>
@@ -32,6 +34,7 @@ class Connection : public net::ProtocolConnection {
     uint64_t file_size = 0;
   };
   std::optional<Upload> upload;
+  TransferTracker upload_tracker;
 
   std::vector<uint8_t> chunk_buffer;
 

@@ -1,9 +1,6 @@
 #include "Connection.hpp"
 
 #include <base/Log.hpp>
-#include <base/time/PreciseTime.hpp>
-
-#include <helpers/SizeFormatter.hpp>
 
 namespace sender {
 
@@ -57,8 +54,7 @@ void Connection::start_file_upload(std::string_view virtual_path, const std::str
 void Connection::upload_accepted_file() {
   auto& up = *upload;
 
-  const auto upload_start_time = base::PreciseTime::now();
-  auto last_report_time = base::PreciseTime::now();
+  upload_tracker.begin(std::string(up.virtual_path), up.file_size);
 
   uint64_t total_bytes_read = 0;
   while (total_bytes_read < up.file_size) {
@@ -74,30 +70,14 @@ void Connection::upload_accepted_file() {
       return;
     }
 
-    const auto now = base::PreciseTime::now();
-    if (now - last_report_time > base::PreciseTime::from_seconds(1.f)) {
-      const auto total_bytes_uploaded = total_bytes_read;
-
-      const auto [uploaded_size, uploaded_size_units] =
-        SizeFormatter::bytes_to_readable_units(total_bytes_uploaded);
-      const auto [total_size, total_size_units] =
-        SizeFormatter::bytes_to_readable_units(up.file_size);
-
-      const auto upload_speed = float(up.file_size) / (now - upload_start_time).seconds();
-      const auto [readable_speed, speed_units] =
-        SizeFormatter::bytes_to_readable_units(uint64_t(upload_speed));
-
-      log_info("`{}`: {:.1f}% - {:.2f}{}/{:.2f}{} - {:.2f} {}/s", up.virtual_path,
-               (float(total_bytes_uploaded) / float(up.file_size)) * 100.f, uploaded_size,
-               uploaded_size_units, total_size, total_size_units, readable_speed, speed_units);
-
-      last_report_time = now;
-    }
+    upload_tracker.progress(chunk.size());
   }
 
   if (!send_packet(net::packets::Acknowledged{.accepted = true})) {
     return;
   }
+
+  upload_tracker.end();
 
   state = State::WaitingForUploadAcknowledgement;
   upload = {};
@@ -203,7 +183,9 @@ void Connection::on_packet_received(const net::packets::FileChunk& packet) {
 
 Connection::Connection(std::unique_ptr<sock::SocketStream> socket,
                        std::vector<FileListing::Entry> send_entries)
-    : net::ProtocolConnection(std::move(socket)), send_entries(std::move(send_entries)) {
+    : net::ProtocolConnection(std::move(socket)),
+      send_entries(std::move(send_entries)),
+      upload_tracker("uploading", [this](std::string_view message) { log_info("{}", message); }) {
   chunk_buffer.resize(receive_buffer_size / 2 + receive_buffer_size / 4);
 }
 

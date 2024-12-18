@@ -1,8 +1,9 @@
 #pragma once
 #include <net/protocol/ProtocolConnection.hpp>
 
+#include <helpers/TransferTracker.hpp>
+
 #include <base/io/File.hpp>
-#include <base/time/PreciseTime.hpp>
 
 #include <optional>
 
@@ -28,11 +29,9 @@ class Connection : public net::ProtocolConnection {
 
     uint64_t file_size = 0;
     uint64_t downloaded_size = 0;
-
-    base::PreciseTime start_time{};
-    base::PreciseTime last_report_time{};
   };
   std::optional<Download> download;
+  TransferTracker download_tracker;
 
  protected:
   void on_error(ErrorType type, sock::Status status) override;

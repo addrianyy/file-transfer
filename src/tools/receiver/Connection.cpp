@@ -3,9 +3,7 @@
 #include <base/Log.hpp>
 
 #include <helpers/IpAddressFormatter.hpp>
-#include <helpers/SizeFormatter.hpp>
 
-#include <algorithm>
 #include <filesystem>
 
 namespace receiver {
@@ -74,23 +72,16 @@ bool Connection::start_file_download(std::string_view virtual_path, uint64_t fil
     return false;
   }
 
-  {
-    const auto [readable_size, units] = SizeFormatter::bytes_to_readable_units(file_size);
-    log_info("{}: downloading file `{}` ({:.2f} {})...", peer_address, virtual_path, readable_size,
-             units);
-  }
-
-  const auto now = base::PreciseTime::now();
-
   state = State::Downloading;
   download = Download{
     .file = std::move(file),
     .virtual_path = std::string(virtual_path),
     .fs_path = fs_path,
     .file_size = file_size,
-    .start_time = now,
-    .last_report_time = now,
+    .downloaded_size = 0,
   };
+
+  download_tracker.begin(std::string(virtual_path), file_size);
 
   if (file_size == 0) {
     finish_file_download();
@@ -112,23 +103,7 @@ void Connection::process_downloaded_chunk(std::span<const uint8_t> chunk) {
       base::format("got more file data for `{}` than expected", down.virtual_path));
   }
 
-  const auto now = base::PreciseTime::now();
-  if (now - down.last_report_time >= base::PreciseTime::from_seconds(1.f)) {
-    const auto [downloaded_size, downloaded_size_units] =
-      SizeFormatter::bytes_to_readable_units(down.downloaded_size);
-    const auto [total_size, total_size_units] =
-      SizeFormatter::bytes_to_readable_units(down.file_size);
-
-    const auto download_speed = float(down.file_size) / (now - down.start_time).seconds();
-    const auto [readable_speed, speed_units] =
-      SizeFormatter::bytes_to_readable_units(uint64_t(download_speed));
-
-    log_info("{}: `{}`: {:.1f}% - {:.2f}{}/{:.2f}{} - {:.2f} {}/s", peer_address, down.virtual_path,
-             (float(down.downloaded_size) / float(down.file_size)) * 100.f, downloaded_size,
-             downloaded_size_units, total_size, total_size_units, readable_speed, speed_units);
-
-    down.last_report_time = now;
-  }
+  download_tracker.progress(chunk.size());
 
   if (down.downloaded_size == down.file_size) {
     finish_file_download();
@@ -136,18 +111,7 @@ void Connection::process_downloaded_chunk(std::span<const uint8_t> chunk) {
 }
 
 void Connection::finish_file_download() {
-  auto& down = *download;
-
-  const auto download_time = base::PreciseTime::now() - down.start_time;
-  const auto download_speed = float(down.file_size) / std::max(download_time.seconds(), 0.00001);
-
-  const auto [readable_size, size_units] = SizeFormatter::bytes_to_readable_units(down.file_size);
-  const auto [readable_speed, speed_units] =
-    SizeFormatter::bytes_to_readable_units(uint64_t(download_speed));
-
-  log_info("{}: downloaded file `{}` ({:.2f} {}) in {} ({:.2f} {}/s)", peer_address,
-           down.virtual_path, readable_size, size_units, download_time, readable_speed,
-           speed_units);
+  download_tracker.end();
 
   send_packet(net::packets::Acknowledged{
     .accepted = true,
@@ -216,6 +180,9 @@ Connection::Connection(std::unique_ptr<sock::SocketStream> socket,
                        std::string receive_directory)
     : net::ProtocolConnection(std::move(socket)),
       peer_address(IpAddressFormatter::format(peer_address)),
-      receive_directory(std::move(receive_directory)) {}
+      receive_directory(std::move(receive_directory)),
+      download_tracker("downloading", [this](std::string_view message) {
+        log_info("{}: {}", this->peer_address, message);
+      }) {}
 
 }  // namespace receiver
