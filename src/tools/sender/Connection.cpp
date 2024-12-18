@@ -28,8 +28,6 @@ void Connection::create_directory(std::string_view virtual_path) {
 }
 
 void Connection::start_file_upload(std::string_view virtual_path, const std::string& fs_path) {
-  log_info("uploading file `{}`...", virtual_path);
-
   base::File file{fs_path, "rb"};
   if (!file) {
     return protocol_error(base::format("failed to open file `{}` for reading", fs_path));
@@ -52,14 +50,14 @@ void Connection::start_file_upload(std::string_view virtual_path, const std::str
     .fs_path = fs_path,
     .file_size = uint64_t(total_file_size),
   };
+
+  upload_tracker.begin(std::string(upload->virtual_path), upload->file_size);
 }
 
 void Connection::upload_accepted_file() {
   auto& up = *upload;
 
   upload_hasher.reset();
-
-  upload_tracker.begin(std::string(up.virtual_path), up.file_size);
 
   uint64_t total_bytes_read = 0;
   while (total_bytes_read < up.file_size) {
