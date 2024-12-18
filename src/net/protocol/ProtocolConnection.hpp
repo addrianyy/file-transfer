@@ -15,6 +15,7 @@ class ProtocolConnection : public Connection {
   static void serialize_packet(BinaryWriter& writer, const packets::CreateDirectory& packet);
   static void serialize_packet(BinaryWriter& writer, const packets::CreateFile& packet);
   static void serialize_packet(BinaryWriter& writer, const packets::FileChunk& packet);
+  static void serialize_packet(BinaryWriter& writer, const packets::VerifyFile& packet);
 
  protected:
   template <typename T>
@@ -35,6 +36,7 @@ class ProtocolConnection : public Connection {
   virtual void on_packet_received(const packets::CreateDirectory& packet) = 0;
   virtual void on_packet_received(const packets::CreateFile& packet) = 0;
   virtual void on_packet_received(const packets::FileChunk& packet) = 0;
+  virtual void on_packet_received(const packets::VerifyFile& packet) = 0;
 
  public:
   explicit ProtocolConnection(std::unique_ptr<sock::SocketStream> socket);

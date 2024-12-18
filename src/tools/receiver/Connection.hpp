@@ -1,6 +1,7 @@
 #pragma once
 #include <net/protocol/ProtocolConnection.hpp>
 
+#include <helpers/Hasher.hpp>
 #include <helpers/TransferTracker.hpp>
 
 #include <base/io/File.hpp>
@@ -17,7 +18,7 @@ class Connection : public net::ProtocolConnection {
     WaitingForHello,
     Idle,
     Downloading,
-    WaitingForDownloadAck,
+    WaitingForHash,
   };
   State state = State::WaitingForHello;
 
@@ -31,6 +32,7 @@ class Connection : public net::ProtocolConnection {
     uint64_t downloaded_size = 0;
   };
   std::optional<Download> download;
+  Hasher download_hasher;
   TransferTracker download_tracker;
 
  protected:
@@ -43,7 +45,8 @@ class Connection : public net::ProtocolConnection {
   bool create_directory(std::string_view virtual_path);
   bool start_file_download(std::string_view virtual_path, uint64_t file_size);
   void process_downloaded_chunk(std::span<const uint8_t> chunk);
-  void finish_file_download();
+  void finish_chunks_download();
+  bool verify_file(uint64_t hash);
 
   void on_packet_received(const net::packets::ReceiverHello& packet) override;
   void on_packet_received(const net::packets::SenderHello& packet) override;
@@ -51,6 +54,7 @@ class Connection : public net::ProtocolConnection {
   void on_packet_received(const net::packets::CreateDirectory& packet) override;
   void on_packet_received(const net::packets::CreateFile& packet) override;
   void on_packet_received(const net::packets::FileChunk& packet) override;
+  void on_packet_received(const net::packets::VerifyFile& packet) override;
 
  public:
   explicit Connection(std::unique_ptr<sock::SocketStream> socket,

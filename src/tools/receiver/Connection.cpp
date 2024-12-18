@@ -79,10 +79,12 @@ bool Connection::start_file_download(std::string_view virtual_path, uint64_t fil
     .downloaded_size = 0,
   };
 
+  download_hasher.reset();
+
   download_tracker.begin(std::string(virtual_path), file_size);
 
   if (file_size == 0) {
-    finish_file_download();
+    finish_chunks_download();
   }
 
   return true;
@@ -101,21 +103,33 @@ void Connection::process_downloaded_chunk(std::span<const uint8_t> chunk) {
       base::format("got more file data for `{}` than expected", down.virtual_path));
   }
 
+  download_hasher.feed(chunk);
+
   download_tracker.progress(chunk.size());
 
   if (down.downloaded_size == down.file_size) {
-    finish_file_download();
+    finish_chunks_download();
   }
 }
 
-void Connection::finish_file_download() {
+void Connection::finish_chunks_download() {
   download_tracker.end();
+  state = State::WaitingForHash;
+}
 
-  send_packet(net::packets::Acknowledged{
-    .accepted = true,
-  });
-  state = State::WaitingForDownloadAck;
-  download = std::nullopt;
+bool Connection::verify_file(uint64_t hash) {
+  auto& down = *download;
+
+  const auto downloaded_hash = download_hasher.finalize();
+  if (hash != downloaded_hash) {
+    protocol_error(base::format("file `{}` failed the integrity check", down.virtual_path));
+    return false;
+  }
+
+  state = State::Idle;
+  download = {};
+
+  return true;
 }
 
 void Connection::on_packet_received(const net::packets::ReceiverHello& packet) {
@@ -132,15 +146,7 @@ void Connection::on_packet_received(const net::packets::SenderHello& packet) {
 }
 
 void Connection::on_packet_received(const net::packets::Acknowledged& packet) {
-  if (state == State::WaitingForDownloadAck) {
-    if (packet.accepted) {
-      state = State::Idle;
-    } else {
-      protocol_error("download ccknowledged packet with accepted = false");
-    }
-  } else {
-    protocol_error("received unxpected Acknowledged packet");
-  }
+  protocol_error("received unexpected Acknowledged packet");
 }
 
 void Connection::on_packet_received(const net::packets::CreateDirectory& packet) {
@@ -170,6 +176,17 @@ void Connection::on_packet_received(const net::packets::FileChunk& packet) {
     process_downloaded_chunk(packet.data);
   } else {
     protocol_error("received unexpected CreateFile packet");
+  }
+}
+
+void Connection::on_packet_received(const net::packets::VerifyFile& packet) {
+  if (state == State::WaitingForHash) {
+    const auto verified = verify_file(packet.hash);
+    send_packet(net::packets::Acknowledged{
+      .accepted = verified,
+    });
+  } else {
+    protocol_error("received unxpected Acknowledged packet");
   }
 }
 

@@ -3,6 +3,7 @@
 
 #include <net/protocol/ProtocolConnection.hpp>
 
+#include <helpers/Hasher.hpp>
 #include <helpers/TransferTracker.hpp>
 
 #include <base/io/File.hpp>
@@ -34,6 +35,7 @@ class Connection : public net::ProtocolConnection {
     uint64_t file_size = 0;
   };
   std::optional<Upload> upload;
+  Hasher upload_hasher;
   TransferTracker upload_tracker;
 
   std::vector<uint8_t> chunk_buffer;
@@ -63,6 +65,7 @@ class Connection : public net::ProtocolConnection {
   void on_packet_received(const net::packets::CreateDirectory& packet) override;
   void on_packet_received(const net::packets::CreateFile& packet) override;
   void on_packet_received(const net::packets::FileChunk& packet) override;
+  void on_packet_received(const net::packets::VerifyFile& packet) override;
 
  public:
   explicit Connection(std::unique_ptr<sock::SocketStream> socket,

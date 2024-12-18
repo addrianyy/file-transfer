@@ -13,6 +13,7 @@ enum class PacketID {
   CreateDirectory,
   CreateFile,
   FileChunk,
+  VerifyFile,
   Max,
 };
 
@@ -36,6 +37,10 @@ struct CreateFile {
 
 struct FileChunk {
   std::span<const uint8_t> data;
+};
+
+struct VerifyFile {
+  uint64_t hash{};
 };
 
 }  // namespace packets

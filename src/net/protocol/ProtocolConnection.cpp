@@ -91,6 +91,15 @@ void net::ProtocolConnection::on_packet_received(BinaryReader reader) {
         .data = data,
       });
     }
+    case PacketID::VerifyFile: {
+      uint64_t hash{};
+      if (!reader.read_u64(hash)) {
+        return protocol_error("failed to deserialize verify file");
+      }
+      return dispatch(packets::VerifyFile{
+        .hash = hash,
+      });
+    }
     default: {
       return protocol_error(base::format("invalid packet id {}", packet_id_u16));
     }
@@ -125,6 +134,12 @@ void net::ProtocolConnection::serialize_packet(BinaryWriter& writer,
                                                const packets::FileChunk& packet) {
   write_packet_id(writer, PacketID::FileChunk);
   writer.write_bytes(packet.data);
+}
+
+void net::ProtocolConnection::serialize_packet(BinaryWriter& writer,
+                                               const packets::VerifyFile& packet) {
+  write_packet_id(writer, PacketID::VerifyFile);
+  writer.write_u64(packet.hash);
 }
 
 net::ProtocolConnection::ProtocolConnection(std::unique_ptr<sock::SocketStream> socket)

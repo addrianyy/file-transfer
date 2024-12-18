@@ -36,11 +36,12 @@ void Connection::start_file_upload(std::string_view virtual_path, const std::str
   }
 
   file.seek(base::File::SeekOrigin::End, 0);
-  const auto total_file_size = uint64_t(file.tell());
+  const auto total_file_size = file.tell();
   verify(total_file_size >= 0, "total file size is negative");
   file.seek(base::File::SeekOrigin::Set, 0);
 
-  if (!send_packet(net::packets::CreateFile{.path = virtual_path, .size = total_file_size})) {
+  if (!send_packet(
+        net::packets::CreateFile{.path = virtual_path, .size = uint64_t(total_file_size)})) {
     return;
   }
 
@@ -49,12 +50,14 @@ void Connection::start_file_upload(std::string_view virtual_path, const std::str
     .file = std::move(file),
     .virtual_path = std::string(virtual_path),
     .fs_path = fs_path,
-    .file_size = total_file_size,
+    .file_size = uint64_t(total_file_size),
   };
 }
 
 void Connection::upload_accepted_file() {
   auto& up = *upload;
+
+  upload_hasher.reset();
 
   upload_tracker.begin(std::string(up.virtual_path), up.file_size);
 
@@ -72,10 +75,14 @@ void Connection::upload_accepted_file() {
       return;
     }
 
+    upload_hasher.feed(chunk);
+
     upload_tracker.progress(chunk.size());
   }
 
-  if (!send_packet(net::packets::Acknowledged{.accepted = true})) {
+  const auto hash = upload_hasher.finalize();
+
+  if (!send_packet(net::packets::VerifyFile{.hash = hash})) {
     return;
   }
 
@@ -181,6 +188,9 @@ void Connection::on_packet_received(const net::packets::CreateFile& packet) {
 }
 void Connection::on_packet_received(const net::packets::FileChunk& packet) {
   protocol_error("received unexpected FileChunk packet");
+}
+void Connection::on_packet_received(const net::packets::VerifyFile& packet) {
+  protocol_error("received unexpected VerifyFile packet");
 }
 
 Connection::Connection(std::unique_ptr<sock::SocketStream> socket,
