@@ -195,7 +195,7 @@ Connection::Connection(std::unique_ptr<sock::SocketStream> socket,
     : net::ProtocolConnection(std::move(socket)),
       send_entries(std::move(send_entries)),
       upload_tracker("uploading", [this](std::string_view message) { log_info("{}", message); }) {
-  chunk_buffer.resize(512 * 1024);
+  chunk_buffer.resize(128 * 1024);
 }
 
 void Connection::start() {
