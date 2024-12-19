@@ -29,12 +29,10 @@ void Connection::disconnect() {
   on_disconnected();
 }
 
-Connection::Connection(std::unique_ptr<sock::SocketStream> socket) : socket(std::move(socket)) {
-  receive_buffer.resize(receive_buffer_size);
-}
+Connection::Connection(std::unique_ptr<sock::SocketStream> socket) : socket(std::move(socket)) {}
 
 void Connection::update() {
-  {
+  frame_receiver.receive([&](std::span<uint8_t> receive_buffer) {
     const auto [status, bytes_received] = socket->receive(receive_buffer);
     if (!status) {
       if (status.has_code(sock::ErrorCode::Disconnected)) {
@@ -44,8 +42,8 @@ void Connection::update() {
       }
     }
 
-    frame_receiver.feed(std::span(receive_buffer).subspan(0, bytes_received));
-  }
+    return bytes_received;
+  });
 
   while (alive_) {
     const auto [result, received_frame] = frame_receiver.update();

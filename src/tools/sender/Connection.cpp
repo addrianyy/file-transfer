@@ -28,7 +28,7 @@ void Connection::create_directory(std::string_view virtual_path) {
 }
 
 void Connection::start_file_upload(std::string_view virtual_path, const std::string& fs_path) {
-  base::File file{fs_path, "rb"};
+  base::File file{fs_path, "rb", base::File::OpenFlags::NoBuffering};
   if (!file) {
     return protocol_error(base::format("failed to open file `{}` for reading", fs_path));
   }
@@ -61,7 +61,7 @@ void Connection::upload_accepted_file() {
 
   uint64_t total_bytes_read = 0;
   while (total_bytes_read < up.file_size) {
-    const auto read_size = up.file.read(chunk_buffer.data(), chunk_buffer.size());
+    const auto read_size = up.file.read(chunk_buffer);
     total_bytes_read += read_size;
 
     if (read_size < chunk_buffer.size() && total_bytes_read != up.file_size) {
@@ -195,7 +195,7 @@ Connection::Connection(std::unique_ptr<sock::SocketStream> socket,
     : net::ProtocolConnection(std::move(socket)),
       send_entries(std::move(send_entries)),
       upload_tracker("uploading", [this](std::string_view message) { log_info("{}", message); }) {
-  chunk_buffer.resize(receive_buffer_size / 2 + receive_buffer_size / 4);
+  chunk_buffer.resize(512 * 1024);
 }
 
 void Connection::start() {

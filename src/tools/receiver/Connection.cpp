@@ -82,7 +82,7 @@ bool Connection::start_file_download(std::string_view virtual_path, uint64_t fil
     return false;
   }
 
-  base::File file{fs_path, "wb"};
+  base::File file{fs_path, "wb", base::File::OpenFlags::NoBuffering};
   if (!file) {
     protocol_error(base::format("failed to open file `{}` for writing", fs_path));
     return false;
@@ -111,7 +111,7 @@ bool Connection::start_file_download(std::string_view virtual_path, uint64_t fil
 void Connection::process_downloaded_chunk(std::span<const uint8_t> chunk) {
   auto& down = *download;
 
-  if (down.file.write(chunk.data(), chunk.size()) != chunk.size()) {
+  if (down.file.write(chunk) != chunk.size()) {
     return protocol_error(base::format("failed to write to file `{}`", down.fs_path));
   }
 

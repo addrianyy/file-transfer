@@ -3,7 +3,10 @@
 #include <binary/BinaryReaderWriter.hpp>
 #include <binary/PrimitiveConverter.hpp>
 
+#include <algorithm>
 #include <cstring>
+
+#include <base/Panic.hpp>
 
 namespace net::framing {
 
@@ -13,17 +16,25 @@ constexpr uint32_t frame_header_size = 8;
 // 8 MB
 constexpr uint32_t frame_max_size = 8 * 1024 * 1024;
 
-void FrameReceiver::feed(std::span<const uint8_t> data) {
-  if (!data.empty()) {
-    const auto previous_size = buffer.size();
-    buffer.resize(previous_size + data.size());
-    std::memcpy(buffer.data() + previous_size, data.data(), data.size());
+std::span<uint8_t> FrameReceiver::prepare_receive_buffer() {
+  const auto remaining_size = buffer.size() - used_size;
+  if (remaining_size < receive_buffer_size) {
+    const auto missing_size = receive_buffer_size - remaining_size;
+    buffer.resize(buffer.size() + missing_size);
   }
+  return std::span(buffer).subspan(used_size, receive_buffer_size);
+}
+
+void FrameReceiver::commit_received_data(size_t size) {
+  used_size += size;
+  verify(used_size <= buffer.size(), "out of bounds receive");
 }
 
 std::pair<FrameReceiver::Result, BinaryReader> FrameReceiver::update() {
-  if (pending_frame_size == invalid_size && buffer.size() >= frame_header_size) {
-    BinaryReader reader{buffer};
+  const auto received_data = std::span(buffer).subspan(0, used_size);
+
+  if (pending_frame_size == invalid_size && received_data.size() >= frame_header_size) {
+    BinaryReader reader{received_data};
 
     uint32_t magic{};
     if (!reader.read_u32(magic) || magic != frame_header_magic) {
@@ -37,11 +48,14 @@ std::pair<FrameReceiver::Result, BinaryReader> FrameReceiver::update() {
     }
 
     pending_frame_size = frame_size;
+
+    // Grow the receive buffer so it fits all frames.
+    receive_buffer_size = std::max(receive_buffer_size, frame_size);
   }
 
-  if (pending_frame_size != invalid_size && buffer.size() >= pending_frame_size) {
+  if (pending_frame_size != invalid_size && received_data.size() >= pending_frame_size) {
     const auto frame =
-      std::span(buffer).subspan(frame_header_size, pending_frame_size - frame_header_size);
+      received_data.subspan(frame_header_size, pending_frame_size - frame_header_size);
     return {Result::ReceivedFrame, BinaryReader{frame}};
   }
 
@@ -49,11 +63,14 @@ std::pair<FrameReceiver::Result, BinaryReader> FrameReceiver::update() {
 }
 
 void FrameReceiver::discard_frame() {
-  if (pending_frame_size != invalid_size && buffer.size() >= pending_frame_size) {
-    std::memmove(buffer.data(), buffer.data() + pending_frame_size,
-                 buffer.size() - pending_frame_size);
-    buffer.resize(buffer.size() - pending_frame_size);
+  const auto received_data = std::span(buffer).subspan(0, used_size);
 
+  if (pending_frame_size != invalid_size && received_data.size() >= pending_frame_size) {
+    const auto frame_size = pending_frame_size;
+    const auto leftover_size = received_data.size() - frame_size;
+
+    std::memmove(received_data.data(), received_data.data() + frame_size, leftover_size);
+    used_size = leftover_size;
     pending_frame_size = invalid_size;
   }
 }

@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <cstdio>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -52,7 +53,10 @@ class File {
   void flush();
 
   size_t read(void* buffer, size_t size);
+  size_t read(std::span<uint8_t> buffer) { return read(buffer.data(), buffer.size()); }
+
   size_t write(const void* buffer, size_t size);
+  size_t write(std::span<const uint8_t> buffer) { return write(buffer.data(), buffer.size()); }
 
   void close();
 };

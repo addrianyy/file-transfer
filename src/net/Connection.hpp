@@ -17,8 +17,6 @@ class Connection {
  private:
   std::unique_ptr<sock::SocketStream> socket;
 
-  std::vector<uint8_t> receive_buffer;
-
   framing::FrameReceiver frame_receiver;
   framing::FrameSender frame_sender;
 
@@ -51,8 +49,6 @@ class Connection {
   virtual void on_packet_received(BinaryReader reader) = 0;
 
  public:
-  constexpr static size_t receive_buffer_size = 64 * 1024;
-
   explicit Connection(std::unique_ptr<sock::SocketStream> socket);
   virtual ~Connection() = default;
 
