@@ -441,12 +441,12 @@ static Result resolve_and_run(sock::IpVersion ip_version,
   }
 }
 
-sock::SocketBase::SocketBase(detail::RawSocket raw_socket) : raw_socket_(raw_socket) {}
-sock::SocketBase::~SocketBase() {
+sock::Socket::Socket(detail::RawSocket raw_socket) : raw_socket_(raw_socket) {}
+sock::Socket::~Socket() {
   close_socket(raw_socket_);
 }
 
-sock::Status sock::SocketBase::set_non_blocking(bool non_blocking) {
+sock::Status sock::Socket::set_non_blocking(bool non_blocking) {
 #if defined(SOCKLIB_WINDOWS)
   u_long non_blocking_value = static_cast<u_long>(non_blocking);
   if (is_error(::ioctlsocket(raw_socket_, FIONBIO, &non_blocking_value))) {
@@ -463,15 +463,15 @@ sock::Status sock::SocketBase::set_non_blocking(bool non_blocking) {
 #endif
 }
 
-sock::Status sock::detail::RwSocketBase::set_receive_timeout_ms(uint64_t timeout_ms) {
+sock::Status sock::detail::RwSocket::set_receive_timeout_ms(uint64_t timeout_ms) {
   return set_socket_option_timeout_ms(raw_socket_, SOL_SOCKET, SO_RCVTIMEO, timeout_ms);
 }
 
-sock::Status sock::detail::RwSocketBase::set_send_timeout_ms(uint64_t timeout_ms) {
+sock::Status sock::detail::RwSocket::set_send_timeout_ms(uint64_t timeout_ms) {
   return set_socket_option_timeout_ms(raw_socket_, SOL_SOCKET, SO_SNDTIMEO, timeout_ms);
 }
 
-sock::Status sock::detail::RwSocketBase::set_broadcast_enabled(bool broadcast_enabled) {
+sock::Status sock::detail::RwSocket::set_broadcast_enabled(bool broadcast_enabled) {
   return set_socket_option<int>(raw_socket_, SOL_SOCKET, SO_BROADCAST, broadcast_enabled ? 1 : 0);
 }
 

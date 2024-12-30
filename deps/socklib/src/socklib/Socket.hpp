@@ -59,16 +59,16 @@ struct IpResolver {
   [[nodiscard]] static ResolveIpV6Result resolve_ipv6(const std::string& hostname);
 };
 
-class SocketBase {
+class Socket {
  protected:
   detail::RawSocket raw_socket_{detail::invalid_raw_socket};
 
-  explicit SocketBase(detail::RawSocket raw_socket);
+  explicit Socket(detail::RawSocket raw_socket);
 
  public:
-  SOCKLIB_NON_COPYABLE_NON_MOVABLE(SocketBase)
+  SOCKLIB_NON_COPYABLE_NON_MOVABLE(Socket)
 
-  ~SocketBase();
+  ~Socket();
 
   [[nodiscard]] detail::RawSocket raw_socket() const { return raw_socket_; }
 
@@ -77,12 +77,12 @@ class SocketBase {
 
 namespace detail {
 
-class RwSocketBase : public SocketBase {
+class RwSocket : public Socket {
  protected:
-  using SocketBase::SocketBase;
+  using Socket::Socket;
 
  public:
-  SOCKLIB_NON_COPYABLE_NON_MOVABLE(RwSocketBase)
+  SOCKLIB_NON_COPYABLE_NON_MOVABLE(RwSocket)
 
   [[nodiscard]] Status set_receive_timeout_ms(uint64_t timeout_ms);
   [[nodiscard]] Status set_send_timeout_ms(uint64_t timeout_ms);
@@ -91,8 +91,8 @@ class RwSocketBase : public SocketBase {
 
 }  // namespace detail
 
-class SocketDatagram : public detail::RwSocketBase {
-  using RwSocketBase::RwSocketBase;
+class SocketDatagram : public detail::RwSocket {
+  using RwSocket::RwSocket;
 
  public:
   SOCKLIB_NON_COPYABLE_NON_MOVABLE(SocketDatagram)
@@ -153,10 +153,10 @@ class SocketDatagram : public detail::RwSocketBase {
   }
 };
 
-class SocketStream : public detail::RwSocketBase {
+class SocketStream : public detail::RwSocket {
   friend class Listener;
 
-  using RwSocketBase::RwSocketBase;
+  using RwSocket::RwSocket;
 
  public:
   SOCKLIB_NON_COPYABLE_NON_MOVABLE(SocketStream)
@@ -201,8 +201,8 @@ class SocketStream : public detail::RwSocketBase {
   }
 };
 
-class Listener : public SocketBase {
-  using SocketBase::SocketBase;
+class Listener : public Socket {
+  using Socket::Socket;
 
  public:
   SOCKLIB_NON_COPYABLE_NON_MOVABLE(Listener)
@@ -261,7 +261,7 @@ class Poller {
   };
 
   struct PollEntry {
-    const SocketBase* socket{};
+    const Socket* socket{};
     QueryEvents query_events{};
     StatusEvents status_events{};
 
