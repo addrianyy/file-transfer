@@ -183,7 +183,7 @@ static bool is_valid_socket(sock::detail::RawSocket socket) {
   return socket != sock::detail::invalid_raw_socket;
 }
 
-static void close_socket(sock::detail::RawSocket socket) {
+static void close_socket_if_valid(sock::detail::RawSocket socket) {
   if (is_valid_socket(socket)) {
 #if defined(SOCKLIB_WINDOWS)
     ::shutdown(socket, SD_BOTH);
@@ -393,7 +393,7 @@ static TResult resolve_ip_generic(int family, std::string_view hostname) {
     if (socket_address_convert_from_raw(current->ai_addr, address)) {
       ::freeaddrinfo(resolved);
       return {
-        .address = address.ip(),
+        .value = address.ip(),
       };
     }
   }
@@ -404,12 +404,12 @@ static TResult resolve_ip_generic(int family, std::string_view hostname) {
   };
 }
 
-sock::IpResolver::ResolveIpV4Result sock::IpResolver::resolve_ipv4(std::string_view hostname) {
-  return resolve_ip_generic<ResolveIpV4Result, SocketIpV4Address>(AF_INET, hostname);
+sock::Result<sock::IpV4Address> sock::IpResolver::resolve_ipv4(std::string_view hostname) {
+  return resolve_ip_generic<Result<IpV4Address>, SocketIpV4Address>(AF_INET, hostname);
 }
 
-sock::IpResolver::ResolveIpV6Result sock::IpResolver::resolve_ipv6(std::string_view hostname) {
-  return resolve_ip_generic<ResolveIpV6Result, SocketIpV6Address>(AF_INET6, hostname);
+sock::Result<sock::IpV6Address> sock::IpResolver::resolve_ipv6(std::string_view hostname) {
+  return resolve_ip_generic<Result<IpV6Address>, SocketIpV6Address>(AF_INET6, hostname);
 }
 
 template <typename Result, typename Fn>
@@ -425,7 +425,7 @@ static Result resolve_and_run(sock::IpVersion ip_version,
           .status = {sock::ErrorCode::IpResolveFailed, resolved.status.error},
         };
       }
-      return callback(sock::SocketIpV4Address(resolved.address, port));
+      return callback(sock::SocketIpV4Address(resolved.value, port));
     }
     case sock::IpVersion::V6: {
       const auto resolved = sock::IpResolver::resolve_ipv6(hostname);
@@ -434,7 +434,7 @@ static Result resolve_and_run(sock::IpVersion ip_version,
           .status = {sock::ErrorCode::IpResolveFailed, resolved.status.error},
         };
       }
-      return callback(sock::SocketIpV6Address(resolved.address, port));
+      return callback(sock::SocketIpV6Address(resolved.value, port));
     }
     default: {
       return {
@@ -444,9 +444,33 @@ static Result resolve_and_run(sock::IpVersion ip_version,
   }
 }
 
+struct sock::detail::RawSocketAccessor {
+  static RawSocket get(const Socket& socket) { return socket.raw_socket_; }
+};
+
 sock::Socket::Socket(detail::RawSocket raw_socket) : raw_socket_(raw_socket) {}
+
+sock::Socket::Socket(Socket&& other) noexcept {
+  raw_socket_ = other.raw_socket_;
+  other.raw_socket_ = detail::invalid_raw_socket;
+}
+
+sock::Socket& sock::Socket::operator=(Socket&& other) noexcept {
+  if (this != &other) {
+    close_socket_if_valid(raw_socket_);
+
+    raw_socket_ = other.raw_socket_;
+    other.raw_socket_ = detail::invalid_raw_socket;
+  }
+  return *this;
+}
+
 sock::Socket::~Socket() {
-  close_socket(raw_socket_);
+  close_socket_if_valid(raw_socket_);
+}
+
+bool sock::Socket::valid() const {
+  return is_valid_socket(raw_socket_);
 }
 
 sock::Status sock::Socket::set_non_blocking(bool non_blocking) {
@@ -478,8 +502,9 @@ sock::Status sock::detail::RwSocket::set_broadcast_enabled(bool broadcast_enable
   return set_socket_option<int>(raw_socket_, SOL_SOCKET, SO_BROADCAST, broadcast_enabled ? 1 : 0);
 }
 
-sock::SocketDatagram::BindResult sock::SocketDatagram::bind(const SocketAddress& address,
-                                                            const BindParameters& bind_parameters) {
+sock::Result<sock::SocketDatagram> sock::SocketDatagram::bind(
+  const SocketAddress& address,
+  const BindParameters& bind_parameters) {
   const auto datagram_socket = ::socket(address_type_to_protocol(address.type()), SOCK_DGRAM, 0);
   if (!is_valid_socket(datagram_socket)) {
     return {
@@ -489,7 +514,7 @@ sock::SocketDatagram::BindResult sock::SocketDatagram::bind(const SocketAddress&
 
   const auto setup_status = setup_socket(datagram_socket, false, bind_parameters.reuse_address);
   if (!setup_status) {
-    close_socket(datagram_socket);
+    close_socket_if_valid(datagram_socket);
     return {
       .status = setup_status,
     };
@@ -502,7 +527,7 @@ sock::SocketDatagram::BindResult sock::SocketDatagram::bind(const SocketAddress&
     });
   if (is_error(bind_result)) {
     const auto status = last_error_to_status(ErrorCode::BindFailed, ErrorSource::Bind);
-    close_socket(datagram_socket);
+    close_socket_if_valid(datagram_socket);
     return {
       .status = status,
     };
@@ -510,20 +535,21 @@ sock::SocketDatagram::BindResult sock::SocketDatagram::bind(const SocketAddress&
 
   return {
     .status = {},
-    .datagram = std::unique_ptr<SocketDatagram>(new SocketDatagram(datagram_socket)),
+    .value = SocketDatagram(datagram_socket),
   };
 }
 
-sock::SocketDatagram::BindResult sock::SocketDatagram::bind(IpVersion ip_version,
-                                                            std::string_view hostname,
-                                                            uint16_t port,
-                                                            const BindParameters& bind_parameters) {
-  return resolve_and_run<BindResult>(
+sock::Result<sock::SocketDatagram> sock::SocketDatagram::bind(
+  IpVersion ip_version,
+  std::string_view hostname,
+  uint16_t port,
+  const BindParameters& bind_parameters) {
+  return resolve_and_run<Result<SocketDatagram>>(
     ip_version, hostname, port,
     [&](const SocketAddress& resolved_address) { return bind(resolved_address, bind_parameters); });
 }
 
-sock::SocketDatagram::CreateResult sock::SocketDatagram::create(
+sock::Result<sock::SocketDatagram> sock::SocketDatagram::anonymous(
   SocketAddress::Type type,
   const CreateParameters& create_parameters) {
   const auto datagram_socket = ::socket(address_type_to_protocol(type), SOCK_DGRAM, 0);
@@ -535,7 +561,7 @@ sock::SocketDatagram::CreateResult sock::SocketDatagram::create(
 
   const auto setup_status = setup_socket(datagram_socket, false, false);
   if (!setup_status) {
-    close_socket(datagram_socket);
+    close_socket_if_valid(datagram_socket);
     return {
       .status = setup_status,
     };
@@ -543,13 +569,13 @@ sock::SocketDatagram::CreateResult sock::SocketDatagram::create(
 
   return {
     .status = {},
-    .datagram = std::unique_ptr<SocketDatagram>(new SocketDatagram(datagram_socket)),
+    .value = SocketDatagram{datagram_socket},
   };
 }
 
-sock::SocketDatagram::SendReceiveResult sock::SocketDatagram::send(const SocketAddress& to,
-                                                                   const void* data,
-                                                                   size_t data_size) {
+sock::Result<size_t> sock::SocketDatagram::send(const SocketAddress& to,
+                                                const void* data,
+                                                size_t data_size) {
   if (data_size == 0) {
     return {};
   }
@@ -581,13 +607,13 @@ sock::SocketDatagram::SendReceiveResult sock::SocketDatagram::send(const SocketA
 
   return {
     .status = {},
-    .byte_count = size_t(result),
+    .value = size_t(result),
   };
 }
 
-sock::SocketDatagram::SendReceiveResult sock::SocketDatagram::send_all(const SocketAddress& to,
-                                                                       const void* data,
-                                                                       size_t data_size) {
+sock::Result<size_t> sock::SocketDatagram::send_all(const SocketAddress& to,
+                                                    const void* data,
+                                                    size_t data_size) {
   auto current = reinterpret_cast<const uint8_t*>(data);
   size_t bytes_sent = 0;
 
@@ -596,7 +622,7 @@ sock::SocketDatagram::SendReceiveResult sock::SocketDatagram::send_all(const Soc
     if (!status) {
       return {
         .status = status,
-        .byte_count = bytes_sent,
+        .value = bytes_sent,
       };
     }
     current += current_sent;
@@ -605,13 +631,13 @@ sock::SocketDatagram::SendReceiveResult sock::SocketDatagram::send_all(const Soc
 
   return {
     .status = {},
-    .byte_count = bytes_sent,
+    .value = bytes_sent,
   };
 }
 
-sock::SocketDatagram::SendReceiveResult sock::SocketDatagram::receive(SocketAddress& from,
-                                                                      void* data,
-                                                                      size_t data_size) {
+sock::Result<size_t> sock::SocketDatagram::receive(SocketAddress& from,
+                                                   void* data,
+                                                   size_t data_size) {
   if (data_size == 0) {
     return {};
   }
@@ -648,11 +674,11 @@ sock::SocketDatagram::SendReceiveResult sock::SocketDatagram::receive(SocketAddr
 
   return {
     .status = {},
-    .byte_count = size_t(result),
+    .value = size_t(result),
   };
 }
 
-sock::SocketStream::ConnectResult sock::SocketStream::connect(
+sock::Result<sock::SocketStream> sock::SocketStream::connect(
   const SocketAddress& address,
   const ConnectParameters& connect_parameters) {
   const auto connection_socket = ::socket(address_type_to_protocol(address.type()), SOCK_STREAM, 0);
@@ -664,7 +690,7 @@ sock::SocketStream::ConnectResult sock::SocketStream::connect(
 
   const auto setup_status = setup_socket(connection_socket, true, false);
   if (!setup_status) {
-    close_socket(connection_socket);
+    close_socket_if_valid(connection_socket);
     return {
       .status = setup_status,
     };
@@ -677,7 +703,7 @@ sock::SocketStream::ConnectResult sock::SocketStream::connect(
   });
   if (is_error(connect_status)) {
     const auto status = last_error_to_status(ErrorCode::ConnectFailed, ErrorSource::Connect);
-    close_socket(connect_status);
+    close_socket_if_valid(connect_status);
     return {
       .status = status,
     };
@@ -685,22 +711,22 @@ sock::SocketStream::ConnectResult sock::SocketStream::connect(
 
   return {
     .status = {},
-    .connection = std::unique_ptr<SocketStream>(new SocketStream(connection_socket)),
+    .value = SocketStream{connection_socket},
   };
 }
 
-sock::SocketStream::ConnectResult sock::SocketStream::connect(
+sock::Result<sock::SocketStream> sock::SocketStream::connect(
   IpVersion ip_version,
   std::string_view hostname,
   uint16_t port,
   const ConnectParameters& connect_parameters) {
-  return resolve_and_run<ConnectResult>(ip_version, hostname, port,
-                                        [&](const SocketAddress& resolved_address) {
-                                          return connect(resolved_address, connect_parameters);
-                                        });
+  return resolve_and_run<Result<SocketStream>>(
+    ip_version, hostname, port, [&](const SocketAddress& resolved_address) {
+      return connect(resolved_address, connect_parameters);
+    });
 }
 
-sock::SocketStream::SendReceiveResult sock::SocketStream::send(const void* data, size_t data_size) {
+sock::Result<size_t> sock::SocketStream::send(const void* data, size_t data_size) {
   if (data_size == 0) {
     return {};
   }
@@ -727,12 +753,11 @@ sock::SocketStream::SendReceiveResult sock::SocketStream::send(const void* data,
 
   return {
     .status = {},
-    .byte_count = size_t(result),
+    .value = size_t(result),
   };
 }
 
-sock::SocketStream::SendReceiveResult sock::SocketStream::send_all(const void* data,
-                                                                   size_t data_size) {
+sock::Result<size_t> sock::SocketStream::send_all(const void* data, size_t data_size) {
   auto current = reinterpret_cast<const uint8_t*>(data);
   size_t bytes_sent = 0;
 
@@ -741,7 +766,7 @@ sock::SocketStream::SendReceiveResult sock::SocketStream::send_all(const void* d
     if (!status) {
       return {
         .status = status,
-        .byte_count = bytes_sent,
+        .value = bytes_sent,
       };
     }
     current += current_sent;
@@ -750,11 +775,11 @@ sock::SocketStream::SendReceiveResult sock::SocketStream::send_all(const void* d
 
   return {
     .status = {},
-    .byte_count = bytes_sent,
+    .value = bytes_sent,
   };
 }
 
-sock::SocketStream::SendReceiveResult sock::SocketStream::receive(void* data, size_t data_size) {
+sock::Result<size_t> sock::SocketStream::receive(void* data, size_t data_size) {
   if (data_size == 0) {
     return {};
   }
@@ -780,12 +805,12 @@ sock::SocketStream::SendReceiveResult sock::SocketStream::receive(void* data, si
 
   return {
     .status = {},
-    .byte_count = size_t(result),
+    .value = size_t(result),
   };
 }
 
-sock::Listener::BindResult sock::Listener::bind(const SocketAddress& address,
-                                                const BindParameters& bind_parameters) {
+sock::Result<sock::Listener> sock::Listener::bind(const SocketAddress& address,
+                                                  const BindParameters& bind_parameters) {
   const auto listener_socket = ::socket(address_type_to_protocol(address.type()), SOCK_STREAM, 0);
   if (!is_valid_socket(listener_socket)) {
     return {
@@ -795,7 +820,7 @@ sock::Listener::BindResult sock::Listener::bind(const SocketAddress& address,
 
   const auto setup_status = setup_socket(listener_socket, false, bind_parameters.reuse_address);
   if (!setup_status) {
-    close_socket(listener_socket);
+    close_socket_if_valid(listener_socket);
     return {
       .status = setup_status,
     };
@@ -808,7 +833,7 @@ sock::Listener::BindResult sock::Listener::bind(const SocketAddress& address,
     });
   if (is_error(bind_result)) {
     const auto status = last_error_to_status(ErrorCode::BindFailed, ErrorSource::Bind);
-    close_socket(listener_socket);
+    close_socket_if_valid(listener_socket);
     return {
       .status = status,
     };
@@ -817,7 +842,7 @@ sock::Listener::BindResult sock::Listener::bind(const SocketAddress& address,
   const auto backlog_size = std::min(bind_parameters.max_pending_connections, SOMAXCONN);
   if (is_error(::listen(listener_socket, backlog_size))) {
     const auto status = last_error_to_status(ErrorCode::ListenFailed, ErrorSource::Listen);
-    close_socket(listener_socket);
+    close_socket_if_valid(listener_socket);
     return {
       .status = status,
     };
@@ -825,20 +850,20 @@ sock::Listener::BindResult sock::Listener::bind(const SocketAddress& address,
 
   return {
     .status = {},
-    .listener = std::unique_ptr<Listener>(new Listener(listener_socket)),
+    .value = Listener{listener_socket},
   };
 }
 
-sock::Listener::BindResult sock::Listener::bind(IpVersion ip_version,
-                                                std::string_view hostname,
-                                                uint16_t port,
-                                                const BindParameters& bind_parameters) {
-  return resolve_and_run<BindResult>(
+sock::Result<sock::Listener> sock::Listener::bind(IpVersion ip_version,
+                                                  std::string_view hostname,
+                                                  uint16_t port,
+                                                  const BindParameters& bind_parameters) {
+  return resolve_and_run<Result<Listener>>(
     ip_version, hostname, port,
     [&](const SocketAddress& resolved_address) { return bind(resolved_address, bind_parameters); });
 }
 
-sock::Listener::AcceptResult sock::Listener::accept(SocketAddress* remote_address) {
+sock::Result<sock::SocketStream> sock::Listener::accept(SocketAddress* remote_address) {
   SockaddrBuffer socket_address;
   socklen_t socket_address_length = sizeof(socket_address);
 
@@ -859,7 +884,7 @@ sock::Listener::AcceptResult sock::Listener::accept(SocketAddress* remote_addres
 
   if (remote_address) {
     if (!socket_address_convert_from_raw(socket_address, *remote_address)) {
-      close_socket(accepted_socket);
+      close_socket_if_valid(accepted_socket);
       return {
         .status = {ErrorCode::AcceptFailed, ErrorCode::AddressConversionFailed},
       };
@@ -868,7 +893,7 @@ sock::Listener::AcceptResult sock::Listener::accept(SocketAddress* remote_addres
 
   return {
     .status = {},
-    .connection = std::unique_ptr<SocketStream>(new SocketStream(accepted_socket)),
+    .value = SocketStream{accepted_socket},
   };
 }
 
@@ -882,7 +907,7 @@ class PollerImpl : public sock::Poller {
   std::vector<RawEntry> raw_entries;
 
  public:
-  PollResult poll(std::span<PollEntry> entries, int timeout_ms) override {
+  sock::Result<size_t> poll(std::span<PollEntry> entries, int timeout_ms) override {
     if (entries.empty()) {
       return {};
     }
@@ -893,7 +918,8 @@ class PollerImpl : public sock::Poller {
       const auto& source = entries[i];
       auto& dest = raw_entries[i];
 
-      dest.fd = source.socket ? source.socket->raw_socket() : sock::detail::RawSocket(-1);
+      dest.fd = source.socket ? sock::detail::RawSocketAccessor::get(*source.socket)
+                              : sock::detail::RawSocket(-1);
       dest.events = {};
 
       if ((source.query_events & QueryEvents::CanReceiveFrom) == QueryEvents::CanReceiveFrom) {
@@ -941,7 +967,7 @@ class PollerImpl : public sock::Poller {
 
     return {
       .status = {},
-      .signaled_sockets = size_t(result),
+      .value = size_t(result),
     };
   }
 };

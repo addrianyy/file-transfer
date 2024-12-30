@@ -208,7 +208,7 @@ void Connection::on_packet_received(const net::packets::VerifyFile& packet) {
   }
 }
 
-Connection::Connection(std::unique_ptr<sock::SocketStream> socket,
+Connection::Connection(sock::SocketStream socket,
                        std::string peer_address,
                        std::string receive_directory)
     : net::ProtocolConnection(std::move(socket)),

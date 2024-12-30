@@ -29,7 +29,7 @@ bool tools::reciever::run(std::span<const std::string_view> args) {
     }
   }
 
-  const auto [bind_status, listener] =
+  auto [bind_status, listener] =
     sock::Listener::bind(tools::SocketIpAddress(tools::IpAddress::unspecified(), port));
   if (!bind_status) {
     log_error("failed to bind receiver to port {}: {}", port, bind_status.stringify());
@@ -56,7 +56,7 @@ bool tools::reciever::run(std::span<const std::string_view> args) {
   while (true) {
     tools::SocketIpAddress peer_address;
 
-    auto [accept_status, connection_socket] = listener->accept(&peer_address);
+    auto [accept_status, connection_socket] = listener.accept(&peer_address);
     if (!accept_status) {
       log_error("failed to accept client: {}", accept_status.stringify());
       continue;

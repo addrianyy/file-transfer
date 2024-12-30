@@ -15,7 +15,7 @@ class Connection {
   };
 
  private:
-  std::unique_ptr<sock::SocketStream> socket;
+  sock::SocketStream socket;
 
   framing::FrameReceiver frame_receiver;
   framing::FrameSender frame_sender;
@@ -49,7 +49,7 @@ class Connection {
   virtual void on_packet_received(BinaryReader reader) = 0;
 
  public:
-  explicit Connection(std::unique_ptr<sock::SocketStream> socket);
+  explicit Connection(sock::SocketStream socket);
   virtual ~Connection() = default;
 
   bool alive() const { return alive_; }

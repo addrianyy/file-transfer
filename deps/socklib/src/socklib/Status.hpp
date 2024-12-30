@@ -12,7 +12,7 @@ enum class ErrorCode {
 #undef X
 };
 
-struct Status {
+struct [[nodiscard]] Status {
   ErrorCode error;
   ErrorCode sub_error;
 
@@ -25,6 +25,14 @@ struct Status {
   static std::string_view stringify_error_code(ErrorCode error_code);
 
   std::string stringify() const;
+};
+
+template <typename Value>
+struct [[nodiscard]] Result {
+  Status status{};
+  Value value{};
+
+  constexpr operator bool() const { return status.success(); }
 };
 
 }  // namespace sock

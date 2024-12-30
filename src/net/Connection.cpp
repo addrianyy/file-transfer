@@ -3,7 +3,7 @@
 namespace net {
 
 bool Connection::send_packet_internal(std::span<const uint8_t> data) {
-  const auto [status, bytes_sent] = socket->send_all(data);
+  const auto [status, bytes_sent] = socket.send_all(data);
   if (!status) {
     if (status.has_code(sock::ErrorCode::Disconnected)) {
       disconnect();
@@ -29,11 +29,11 @@ void Connection::disconnect() {
   on_disconnected();
 }
 
-Connection::Connection(std::unique_ptr<sock::SocketStream> socket) : socket(std::move(socket)) {}
+Connection::Connection(sock::SocketStream socket) : socket(std::move(socket)) {}
 
 void Connection::update() {
   frame_receiver.receive([&](std::span<uint8_t> receive_buffer) {
-    const auto [status, bytes_received] = socket->receive(receive_buffer);
+    const auto [status, bytes_received] = socket.receive(receive_buffer);
     if (!status) {
       if (status.has_code(sock::ErrorCode::Disconnected)) {
         disconnect();

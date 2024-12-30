@@ -39,7 +39,7 @@ class ProtocolConnection : public Connection {
   virtual void on_packet_received(const packets::VerifyFile& packet) = 0;
 
  public:
-  explicit ProtocolConnection(std::unique_ptr<sock::SocketStream> socket);
+  explicit ProtocolConnection(sock::SocketStream socket);
 };
 
 }  // namespace net

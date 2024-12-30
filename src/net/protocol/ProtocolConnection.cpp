@@ -142,5 +142,5 @@ void net::ProtocolConnection::serialize_packet(BinaryWriter& writer,
   writer.write_u64(packet.hash);
 }
 
-net::ProtocolConnection::ProtocolConnection(std::unique_ptr<sock::SocketStream> socket)
+net::ProtocolConnection::ProtocolConnection(sock::SocketStream socket)
     : Connection(std::move(socket)) {}

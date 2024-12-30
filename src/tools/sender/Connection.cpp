@@ -190,8 +190,7 @@ void Connection::on_packet_received(const net::packets::VerifyFile& packet) {
   protocol_error("received unexpected VerifyFile packet");
 }
 
-Connection::Connection(std::unique_ptr<sock::SocketStream> socket,
-                       std::vector<FileListing::Entry> send_entries)
+Connection::Connection(sock::SocketStream socket, std::vector<FileListing::Entry> send_entries)
     : net::ProtocolConnection(std::move(socket)),
       send_entries(std::move(send_entries)),
       upload_tracker("uploading", [this](std::string_view message) { log_info("{}", message); }) {

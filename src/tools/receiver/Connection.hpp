@@ -58,7 +58,7 @@ class Connection : public net::ProtocolConnection {
   void on_packet_received(const net::packets::VerifyFile& packet) override;
 
  public:
-  explicit Connection(std::unique_ptr<sock::SocketStream> socket,
+  explicit Connection(sock::SocketStream socket,
                       std::string peer_address,
                       std::string receive_directory);
 };

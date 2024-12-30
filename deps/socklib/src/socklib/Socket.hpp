@@ -9,12 +9,6 @@
 #include "Address.hpp"
 #include "Status.hpp"
 
-#define SOCKLIB_NON_COPYABLE_NON_MOVABLE(target) \
-  target(const target&) = delete;                \
-  target& operator=(const target&) = delete;     \
-  target(target&&) = delete;                     \
-  target& operator=(target&&) = delete;
-
 #define SOCKLIB_IMPLEMENT_ENUM_BIT_OPERATIONS(type) \
   constexpr inline type operator|(type a, type b) { \
     using T = std::underlying_type_t<type>;         \
@@ -32,6 +26,7 @@
 namespace sock {
 
 namespace detail {
+
 #if defined(_WIN32)
 using RawSocket = uintptr_t;
 constexpr RawSocket invalid_raw_socket = static_cast<RawSocket>(~static_cast<uintptr_t>(0));
@@ -39,38 +34,37 @@ constexpr RawSocket invalid_raw_socket = static_cast<RawSocket>(~static_cast<uin
 using RawSocket = int;
 constexpr RawSocket invalid_raw_socket = -1;
 #endif
+
+struct RawSocketAccessor;
+
 }  // namespace detail
 
 struct IpResolver {
-  struct ResolveIpV4Result {
-    Status status{};
-    IpV4Address address{};
-
-    constexpr operator bool() const { return status.success(); }
-  };
-  [[nodiscard]] static ResolveIpV4Result resolve_ipv4(std::string_view hostname);
-
-  struct ResolveIpV6Result {
-    Status status{};
-    IpV6Address address{};
-
-    constexpr operator bool() const { return status.success(); }
-  };
-  [[nodiscard]] static ResolveIpV6Result resolve_ipv6(std::string_view hostname);
+  static Result<IpV4Address> resolve_ipv4(std::string_view hostname);
+  static Result<IpV6Address> resolve_ipv6(std::string_view hostname);
 };
 
 class Socket {
+  friend class detail::RawSocketAccessor;
+
  protected:
   detail::RawSocket raw_socket_{detail::invalid_raw_socket};
 
   explicit Socket(detail::RawSocket raw_socket);
 
  public:
-  SOCKLIB_NON_COPYABLE_NON_MOVABLE(Socket)
+  Socket() = default;
+
+  Socket(Socket&& other) noexcept;
+  Socket& operator=(Socket&& other) noexcept;
+
+  Socket(const Socket& other) = delete;
+  Socket& operator=(const Socket& other) = delete;
 
   ~Socket();
 
-  [[nodiscard]] detail::RawSocket raw_socket() const { return raw_socket_; }
+  bool valid() const;
+  operator bool() const { return valid(); }
 
   [[nodiscard]] Status set_non_blocking(bool non_blocking);
 };
@@ -82,8 +76,6 @@ class RwSocket : public Socket {
   using Socket::Socket;
 
  public:
-  SOCKLIB_NON_COPYABLE_NON_MOVABLE(RwSocket)
-
   [[nodiscard]] Status set_receive_timeout_ms(uint64_t timeout_ms);
   [[nodiscard]] Status set_send_timeout_ms(uint64_t timeout_ms);
   [[nodiscard]] Status set_broadcast_enabled(bool broadcast_enabled);
@@ -95,60 +87,40 @@ class SocketDatagram : public detail::RwSocket {
   using RwSocket::RwSocket;
 
  public:
-  SOCKLIB_NON_COPYABLE_NON_MOVABLE(SocketDatagram)
-
-  struct BindResult {
-    Status status{};
-    std::unique_ptr<SocketDatagram> datagram{};
-
-    constexpr operator bool() const { return status.success(); }
-  };
   struct BindParameters {
     bool reuse_address = false;
 
     constexpr static BindParameters default_parameters() { return BindParameters{}; }
   };
-  [[nodiscard]] static BindResult bind(
+  [[nodiscard]] static Result<SocketDatagram> bind(
     const SocketAddress& address,
     const BindParameters& bind_parameters = BindParameters::default_parameters());
-  [[nodiscard]] static BindResult bind(
+  [[nodiscard]] static Result<SocketDatagram> bind(
     IpVersion ip_version,
     std::string_view hostname,
     uint16_t port,
     const BindParameters& bind_parameters = BindParameters::default_parameters());
 
-  struct CreateResult {
-    Status status{};
-    std::unique_ptr<SocketDatagram> datagram{};
-
-    constexpr operator bool() const { return status.success(); }
-  };
   struct CreateParameters {
     constexpr static CreateParameters default_parameters() { return CreateParameters{}; }
   };
-  [[nodiscard]] static CreateResult create(
+  [[nodiscard]] static Result<SocketDatagram> anonymous(
     SocketAddress::Type type,
     const CreateParameters& create_parameters = CreateParameters::default_parameters());
 
-  struct SendReceiveResult {
-    Status status{};
-    size_t byte_count{};
+  [[nodiscard]] Result<size_t> send(const SocketAddress& to, const void* data, size_t data_size);
+  [[nodiscard]] Result<size_t> send_all(const SocketAddress& to,
+                                        const void* data,
+                                        size_t data_size);
+  [[nodiscard]] Result<size_t> receive(SocketAddress& from, void* data, size_t data_size);
 
-    constexpr operator bool() const { return status.success(); }
-  };
-  [[nodiscard]] SendReceiveResult send(const SocketAddress& to, const void* data, size_t data_size);
-  [[nodiscard]] SendReceiveResult send_all(const SocketAddress& to,
-                                           const void* data,
-                                           size_t data_size);
-  [[nodiscard]] SendReceiveResult receive(SocketAddress& from, void* data, size_t data_size);
-
-  [[nodiscard]] SendReceiveResult send(const SocketAddress& to, std::span<const uint8_t> data) {
+  [[nodiscard]] Result<size_t> send(const SocketAddress& to, std::span<const uint8_t> data) {
     return send(to, data.data(), data.size());
   }
-  [[nodiscard]] SendReceiveResult send_all(const SocketAddress& to, std::span<const uint8_t> data) {
+  [[nodiscard]] Result<size_t> send_all(const SocketAddress& to, std::span<const uint8_t> data) {
     return send_all(to, data.data(), data.size());
   }
-  [[nodiscard]] SendReceiveResult receive(SocketAddress& from, std::span<uint8_t> data) {
+  [[nodiscard]] Result<size_t> receive(SocketAddress& from, std::span<uint8_t> data) {
     return receive(from, data.data(), data.size());
   }
 };
@@ -159,44 +131,29 @@ class SocketStream : public detail::RwSocket {
   using RwSocket::RwSocket;
 
  public:
-  SOCKLIB_NON_COPYABLE_NON_MOVABLE(SocketStream)
-
-  struct ConnectResult {
-    Status status{};
-    std::unique_ptr<SocketStream> connection;
-
-    constexpr operator bool() const { return status.success(); }
-  };
   struct ConnectParameters {
     constexpr static ConnectParameters default_parameters() { return ConnectParameters{}; }
   };
-  [[nodiscard]] static ConnectResult connect(
+  [[nodiscard]] static Result<SocketStream> connect(
     const SocketAddress& address,
     const ConnectParameters& connect_parameters = ConnectParameters::default_parameters());
-  [[nodiscard]] static ConnectResult connect(
+  [[nodiscard]] static Result<SocketStream> connect(
     IpVersion ip_version,
     std::string_view hostname,
     uint16_t port,
     const ConnectParameters& connect_parameters = ConnectParameters::default_parameters());
 
-  struct SendReceiveResult {
-    Status status{};
-    size_t byte_count{};
+  [[nodiscard]] Result<size_t> send(const void* data, size_t data_size);
+  [[nodiscard]] Result<size_t> send_all(const void* data, size_t data_size);
+  [[nodiscard]] Result<size_t> receive(void* data, size_t data_size);
 
-    constexpr operator bool() const { return status.success(); }
-  };
-
-  [[nodiscard]] SendReceiveResult send(const void* data, size_t data_size);
-  [[nodiscard]] SendReceiveResult send_all(const void* data, size_t data_size);
-  [[nodiscard]] SendReceiveResult receive(void* data, size_t data_size);
-
-  [[nodiscard]] SendReceiveResult send(std::span<const uint8_t> data) {
+  [[nodiscard]] Result<size_t> send(std::span<const uint8_t> data) {
     return send(data.data(), data.size());
   }
-  [[nodiscard]] SendReceiveResult send_all(std::span<const uint8_t> data) {
+  [[nodiscard]] Result<size_t> send_all(std::span<const uint8_t> data) {
     return send_all(data.data(), data.size());
   }
-  [[nodiscard]] SendReceiveResult receive(std::span<uint8_t> data) {
+  [[nodiscard]] Result<size_t> receive(std::span<uint8_t> data) {
     return receive(data.data(), data.size());
   }
 };
@@ -205,36 +162,22 @@ class Listener : public Socket {
   using Socket::Socket;
 
  public:
-  SOCKLIB_NON_COPYABLE_NON_MOVABLE(Listener)
-
   struct BindParameters {
     bool reuse_address = false;
     int max_pending_connections = 16;
 
     constexpr static BindParameters default_parameters() { return BindParameters{}; }
   };
-  struct BindResult {
-    Status status{};
-    std::unique_ptr<Listener> listener;
-
-    constexpr operator bool() const { return status.success(); }
-  };
-  [[nodiscard]] static BindResult bind(
+  [[nodiscard]] static Result<Listener> bind(
     const SocketAddress& address,
     const BindParameters& bind_parameters = BindParameters::default_parameters());
-  [[nodiscard]] static BindResult bind(
+  [[nodiscard]] static Result<Listener> bind(
     IpVersion ip_version,
     std::string_view hostname,
     uint16_t port,
     const BindParameters& bind_parameters = BindParameters::default_parameters());
 
-  struct AcceptResult {
-    Status status{};
-    std::unique_ptr<SocketStream> connection;
-
-    constexpr operator bool() const { return status.success(); }
-  };
-  [[nodiscard]] AcceptResult accept(SocketAddress* remote_address = nullptr);
+  [[nodiscard]] Result<SocketStream> accept(SocketAddress* remote_address = nullptr);
 };
 
 class Poller {
@@ -269,13 +212,7 @@ class Poller {
     bool has_one_of_status_events(StatusEvents events) const;
   };
 
-  struct PollResult {
-    Status status{};
-    size_t signaled_sockets{};
-
-    constexpr operator bool() const { return status.success(); }
-  };
-  [[nodiscard]] virtual PollResult poll(std::span<PollEntry> entries, int timeout_ms) = 0;
+  [[nodiscard]] virtual Result<size_t> poll(std::span<PollEntry> entries, int timeout_ms) = 0;
 };
 
 SOCKLIB_IMPLEMENT_ENUM_BIT_OPERATIONS(Poller::QueryEvents)
@@ -285,5 +222,4 @@ SOCKLIB_IMPLEMENT_ENUM_BIT_OPERATIONS(Poller::StatusEvents)
 
 }  // namespace sock
 
-#undef SOCKLIB_NON_COPYABLE_NON_MOVABLE
 #undef SOCKLIB_IMPLEMENT_ENUM_BIT_OPERATIONS
