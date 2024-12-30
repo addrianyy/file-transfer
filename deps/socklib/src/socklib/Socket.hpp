@@ -76,9 +76,9 @@ class RwSocket : public Socket {
   using Socket::Socket;
 
  public:
-  [[nodiscard]] Status set_receive_timeout_ms(uint64_t timeout_ms);
-  [[nodiscard]] Status set_send_timeout_ms(uint64_t timeout_ms);
-  [[nodiscard]] Status set_broadcast_enabled(bool broadcast_enabled);
+  Status set_receive_timeout_ms(uint64_t timeout_ms);
+  Status set_send_timeout_ms(uint64_t timeout_ms);
+  Status set_broadcast_enabled(bool broadcast_enabled);
 };
 
 }  // namespace detail
@@ -92,10 +92,10 @@ class SocketDatagram : public detail::RwSocket {
 
     constexpr static BindParameters default_parameters() { return BindParameters{}; }
   };
-  [[nodiscard]] static Result<SocketDatagram> bind(
+  static Result<SocketDatagram> bind(
     const SocketAddress& address,
     const BindParameters& bind_parameters = BindParameters::default_parameters());
-  [[nodiscard]] static Result<SocketDatagram> bind(
+  static Result<SocketDatagram> bind(
     IpVersion ip_version,
     std::string_view hostname,
     uint16_t port,
@@ -104,23 +104,21 @@ class SocketDatagram : public detail::RwSocket {
   struct CreateParameters {
     constexpr static CreateParameters default_parameters() { return CreateParameters{}; }
   };
-  [[nodiscard]] static Result<SocketDatagram> anonymous(
+  static Result<SocketDatagram> anonymous(
     SocketAddress::Type type,
     const CreateParameters& create_parameters = CreateParameters::default_parameters());
 
-  [[nodiscard]] Result<size_t> send(const SocketAddress& to, const void* data, size_t data_size);
-  [[nodiscard]] Result<size_t> send_all(const SocketAddress& to,
-                                        const void* data,
-                                        size_t data_size);
-  [[nodiscard]] Result<size_t> receive(SocketAddress& from, void* data, size_t data_size);
+  Result<size_t> send(const SocketAddress& to, const void* data, size_t data_size);
+  Result<size_t> send_all(const SocketAddress& to, const void* data, size_t data_size);
+  Result<size_t> receive(SocketAddress& from, void* data, size_t data_size);
 
-  [[nodiscard]] Result<size_t> send(const SocketAddress& to, std::span<const uint8_t> data) {
+  Result<size_t> send(const SocketAddress& to, std::span<const uint8_t> data) {
     return send(to, data.data(), data.size());
   }
-  [[nodiscard]] Result<size_t> send_all(const SocketAddress& to, std::span<const uint8_t> data) {
+  Result<size_t> send_all(const SocketAddress& to, std::span<const uint8_t> data) {
     return send_all(to, data.data(), data.size());
   }
-  [[nodiscard]] Result<size_t> receive(SocketAddress& from, std::span<uint8_t> data) {
+  Result<size_t> receive(SocketAddress& from, std::span<uint8_t> data) {
     return receive(from, data.data(), data.size());
   }
 };
@@ -134,28 +132,24 @@ class SocketStream : public detail::RwSocket {
   struct ConnectParameters {
     constexpr static ConnectParameters default_parameters() { return ConnectParameters{}; }
   };
-  [[nodiscard]] static Result<SocketStream> connect(
+  static Result<SocketStream> connect(
     const SocketAddress& address,
     const ConnectParameters& connect_parameters = ConnectParameters::default_parameters());
-  [[nodiscard]] static Result<SocketStream> connect(
+  static Result<SocketStream> connect(
     IpVersion ip_version,
     std::string_view hostname,
     uint16_t port,
     const ConnectParameters& connect_parameters = ConnectParameters::default_parameters());
 
-  [[nodiscard]] Result<size_t> send(const void* data, size_t data_size);
-  [[nodiscard]] Result<size_t> send_all(const void* data, size_t data_size);
-  [[nodiscard]] Result<size_t> receive(void* data, size_t data_size);
+  Result<size_t> send(const void* data, size_t data_size);
+  Result<size_t> send_all(const void* data, size_t data_size);
+  Result<size_t> receive(void* data, size_t data_size);
 
-  [[nodiscard]] Result<size_t> send(std::span<const uint8_t> data) {
-    return send(data.data(), data.size());
-  }
-  [[nodiscard]] Result<size_t> send_all(std::span<const uint8_t> data) {
+  Result<size_t> send(std::span<const uint8_t> data) { return send(data.data(), data.size()); }
+  Result<size_t> send_all(std::span<const uint8_t> data) {
     return send_all(data.data(), data.size());
   }
-  [[nodiscard]] Result<size_t> receive(std::span<uint8_t> data) {
-    return receive(data.data(), data.size());
-  }
+  Result<size_t> receive(std::span<uint8_t> data) { return receive(data.data(), data.size()); }
 };
 
 class Listener : public Socket {
@@ -168,16 +162,16 @@ class Listener : public Socket {
 
     constexpr static BindParameters default_parameters() { return BindParameters{}; }
   };
-  [[nodiscard]] static Result<Listener> bind(
+  static Result<Listener> bind(
     const SocketAddress& address,
     const BindParameters& bind_parameters = BindParameters::default_parameters());
-  [[nodiscard]] static Result<Listener> bind(
+  static Result<Listener> bind(
     IpVersion ip_version,
     std::string_view hostname,
     uint16_t port,
     const BindParameters& bind_parameters = BindParameters::default_parameters());
 
-  [[nodiscard]] Result<SocketStream> accept(SocketAddress* remote_address = nullptr);
+  Result<SocketStream> accept(SocketAddress* remote_address = nullptr);
 };
 
 class Poller {
@@ -212,7 +206,7 @@ class Poller {
     bool has_one_of_status_events(StatusEvents events) const;
   };
 
-  [[nodiscard]] virtual Result<size_t> poll(std::span<PollEntry> entries, int timeout_ms) = 0;
+  virtual Result<size_t> poll(std::span<PollEntry> entries, int timeout_ms) = 0;
 };
 
 SOCKLIB_IMPLEMENT_ENUM_BIT_OPERATIONS(Poller::QueryEvents)
