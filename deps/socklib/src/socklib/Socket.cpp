@@ -896,12 +896,12 @@ sock::Result<sock::Listener> sock::Listener::bind(IpVersion ip_version,
     [&](const SocketAddress& resolved_address) { return bind(resolved_address, bind_parameters); });
 }
 
-sock::Result<sock::StreamSocket> sock::Listener::accept(SocketAddress* remote_address) {
+sock::Result<sock::StreamSocket> sock::Listener::accept(SocketAddress* peer_address) {
   SockaddrBuffer socket_address;
   socklen_t socket_address_length = sizeof(socket_address);
 
   const detail::RawSocket accepted_socket = handle_eintr([&]() -> detail::RawSocket {
-    if (remote_address) {
+    if (peer_address) {
       return ::accept(raw_socket_, reinterpret_cast<sockaddr*>(socket_address.data),
                       &socket_address_length);
     } else {
@@ -915,8 +915,8 @@ sock::Result<sock::StreamSocket> sock::Listener::accept(SocketAddress* remote_ad
     };
   }
 
-  if (remote_address) {
-    if (!socket_address_convert_from_raw(socket_address, *remote_address)) {
+  if (peer_address) {
+    if (!socket_address_convert_from_raw(socket_address, *peer_address)) {
       close_socket_if_valid(accepted_socket);
       return {
         .status = {Error::AcceptFailed, Error::AddressConversionFailed},

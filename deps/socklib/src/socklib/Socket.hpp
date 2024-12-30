@@ -187,7 +187,7 @@ class Listener : public Socket {
     uint16_t port,
     const BindParameters& bind_parameters = BindParameters::default_parameters());
 
-  Result<StreamSocket> accept(SocketAddress* remote_address = nullptr);
+  Result<StreamSocket> accept(SocketAddress* peer_address = nullptr);
 };
 
 class Poller {
