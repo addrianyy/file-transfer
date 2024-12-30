@@ -29,7 +29,7 @@ void Connection::disconnect() {
   on_disconnected();
 }
 
-Connection::Connection(sock::SocketStream socket) : socket(std::move(socket)) {}
+Connection::Connection(sock::StreamSocket socket) : socket(std::move(socket)) {}
 
 void Connection::update() {
   frame_receiver.receive([&](std::span<uint8_t> receive_buffer) {

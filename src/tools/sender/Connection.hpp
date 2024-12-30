@@ -68,7 +68,7 @@ class Connection : public net::ProtocolConnection {
   void on_packet_received(const net::packets::VerifyFile& packet) override;
 
  public:
-  explicit Connection(sock::SocketStream socket, std::vector<FileListing::Entry> send_entries);
+  explicit Connection(sock::StreamSocket socket, std::vector<FileListing::Entry> send_entries);
 
   void start();
 

@@ -502,7 +502,7 @@ sock::Status sock::detail::RwSocket::set_broadcast_enabled(bool broadcast_enable
   return set_socket_option<int>(raw_socket_, SOL_SOCKET, SO_BROADCAST, broadcast_enabled ? 1 : 0);
 }
 
-sock::Result<sock::SocketDatagram> sock::SocketDatagram::bind(
+sock::Result<sock::DatagramSocket> sock::DatagramSocket::bind(
   const SocketAddress& address,
   const BindParameters& bind_parameters) {
   const auto datagram_socket = ::socket(address_type_to_protocol(address.type()), SOCK_DGRAM, 0);
@@ -535,21 +535,21 @@ sock::Result<sock::SocketDatagram> sock::SocketDatagram::bind(
 
   return {
     .status = {},
-    .value = SocketDatagram(datagram_socket),
+    .value = DatagramSocket(datagram_socket),
   };
 }
 
-sock::Result<sock::SocketDatagram> sock::SocketDatagram::bind(
+sock::Result<sock::DatagramSocket> sock::DatagramSocket::bind(
   IpVersion ip_version,
   std::string_view hostname,
   uint16_t port,
   const BindParameters& bind_parameters) {
-  return resolve_and_run<Result<SocketDatagram>>(
+  return resolve_and_run<Result<DatagramSocket>>(
     ip_version, hostname, port,
     [&](const SocketAddress& resolved_address) { return bind(resolved_address, bind_parameters); });
 }
 
-sock::Result<sock::SocketDatagram> sock::SocketDatagram::anonymous(
+sock::Result<sock::DatagramSocket> sock::DatagramSocket::anonymous(
   SocketAddress::Type type,
   const CreateParameters& create_parameters) {
   const auto datagram_socket = ::socket(address_type_to_protocol(type), SOCK_DGRAM, 0);
@@ -569,11 +569,11 @@ sock::Result<sock::SocketDatagram> sock::SocketDatagram::anonymous(
 
   return {
     .status = {},
-    .value = SocketDatagram{datagram_socket},
+    .value = DatagramSocket{datagram_socket},
   };
 }
 
-sock::Result<size_t> sock::SocketDatagram::send(const SocketAddress& to,
+sock::Result<size_t> sock::DatagramSocket::send(const SocketAddress& to,
                                                 const void* data,
                                                 size_t data_size) {
   if (data_size == 0) {
@@ -611,7 +611,7 @@ sock::Result<size_t> sock::SocketDatagram::send(const SocketAddress& to,
   };
 }
 
-sock::Result<size_t> sock::SocketDatagram::send_all(const SocketAddress& to,
+sock::Result<size_t> sock::DatagramSocket::send_all(const SocketAddress& to,
                                                     const void* data,
                                                     size_t data_size) {
   auto current = reinterpret_cast<const uint8_t*>(data);
@@ -635,7 +635,7 @@ sock::Result<size_t> sock::SocketDatagram::send_all(const SocketAddress& to,
   };
 }
 
-sock::Result<size_t> sock::SocketDatagram::receive(SocketAddress& from,
+sock::Result<size_t> sock::DatagramSocket::receive(SocketAddress& from,
                                                    void* data,
                                                    size_t data_size) {
   if (data_size == 0) {
@@ -678,7 +678,7 @@ sock::Result<size_t> sock::SocketDatagram::receive(SocketAddress& from,
   };
 }
 
-sock::Result<sock::SocketStream> sock::SocketStream::connect(
+sock::Result<sock::StreamSocket> sock::StreamSocket::connect(
   const SocketAddress& address,
   const ConnectParameters& connect_parameters) {
   const auto connection_socket = ::socket(address_type_to_protocol(address.type()), SOCK_STREAM, 0);
@@ -711,22 +711,22 @@ sock::Result<sock::SocketStream> sock::SocketStream::connect(
 
   return {
     .status = {},
-    .value = SocketStream{connection_socket},
+    .value = StreamSocket{connection_socket},
   };
 }
 
-sock::Result<sock::SocketStream> sock::SocketStream::connect(
+sock::Result<sock::StreamSocket> sock::StreamSocket::connect(
   IpVersion ip_version,
   std::string_view hostname,
   uint16_t port,
   const ConnectParameters& connect_parameters) {
-  return resolve_and_run<Result<SocketStream>>(
+  return resolve_and_run<Result<StreamSocket>>(
     ip_version, hostname, port, [&](const SocketAddress& resolved_address) {
       return connect(resolved_address, connect_parameters);
     });
 }
 
-sock::Result<size_t> sock::SocketStream::send(const void* data, size_t data_size) {
+sock::Result<size_t> sock::StreamSocket::send(const void* data, size_t data_size) {
   if (data_size == 0) {
     return {};
   }
@@ -757,7 +757,7 @@ sock::Result<size_t> sock::SocketStream::send(const void* data, size_t data_size
   };
 }
 
-sock::Result<size_t> sock::SocketStream::send_all(const void* data, size_t data_size) {
+sock::Result<size_t> sock::StreamSocket::send_all(const void* data, size_t data_size) {
   auto current = reinterpret_cast<const uint8_t*>(data);
   size_t bytes_sent = 0;
 
@@ -779,7 +779,7 @@ sock::Result<size_t> sock::SocketStream::send_all(const void* data, size_t data_
   };
 }
 
-sock::Result<size_t> sock::SocketStream::receive(void* data, size_t data_size) {
+sock::Result<size_t> sock::StreamSocket::receive(void* data, size_t data_size) {
   if (data_size == 0) {
     return {};
   }
@@ -863,7 +863,7 @@ sock::Result<sock::Listener> sock::Listener::bind(IpVersion ip_version,
     [&](const SocketAddress& resolved_address) { return bind(resolved_address, bind_parameters); });
 }
 
-sock::Result<sock::SocketStream> sock::Listener::accept(SocketAddress* remote_address) {
+sock::Result<sock::StreamSocket> sock::Listener::accept(SocketAddress* remote_address) {
   SockaddrBuffer socket_address;
   socklen_t socket_address_length = sizeof(socket_address);
 
@@ -893,7 +893,7 @@ sock::Result<sock::SocketStream> sock::Listener::accept(SocketAddress* remote_ad
 
   return {
     .status = {},
-    .value = SocketStream{accepted_socket},
+    .value = StreamSocket{accepted_socket},
   };
 }
 

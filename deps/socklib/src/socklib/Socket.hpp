@@ -2,7 +2,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <span>
 #include <string_view>
 
@@ -83,7 +82,7 @@ class RwSocket : public Socket {
 
 }  // namespace detail
 
-class SocketDatagram : public detail::RwSocket {
+class DatagramSocket : public detail::RwSocket {
   using RwSocket::RwSocket;
 
  public:
@@ -92,10 +91,10 @@ class SocketDatagram : public detail::RwSocket {
 
     constexpr static BindParameters default_parameters() { return BindParameters{}; }
   };
-  static Result<SocketDatagram> bind(
+  static Result<DatagramSocket> bind(
     const SocketAddress& address,
     const BindParameters& bind_parameters = BindParameters::default_parameters());
-  static Result<SocketDatagram> bind(
+  static Result<DatagramSocket> bind(
     IpVersion ip_version,
     std::string_view hostname,
     uint16_t port,
@@ -104,7 +103,7 @@ class SocketDatagram : public detail::RwSocket {
   struct CreateParameters {
     constexpr static CreateParameters default_parameters() { return CreateParameters{}; }
   };
-  static Result<SocketDatagram> anonymous(
+  static Result<DatagramSocket> anonymous(
     SocketAddress::Type type,
     const CreateParameters& create_parameters = CreateParameters::default_parameters());
 
@@ -123,7 +122,7 @@ class SocketDatagram : public detail::RwSocket {
   }
 };
 
-class SocketStream : public detail::RwSocket {
+class StreamSocket : public detail::RwSocket {
   friend class Listener;
 
   using RwSocket::RwSocket;
@@ -132,10 +131,10 @@ class SocketStream : public detail::RwSocket {
   struct ConnectParameters {
     constexpr static ConnectParameters default_parameters() { return ConnectParameters{}; }
   };
-  static Result<SocketStream> connect(
+  static Result<StreamSocket> connect(
     const SocketAddress& address,
     const ConnectParameters& connect_parameters = ConnectParameters::default_parameters());
-  static Result<SocketStream> connect(
+  static Result<StreamSocket> connect(
     IpVersion ip_version,
     std::string_view hostname,
     uint16_t port,
@@ -171,7 +170,7 @@ class Listener : public Socket {
     uint16_t port,
     const BindParameters& bind_parameters = BindParameters::default_parameters());
 
-  Result<SocketStream> accept(SocketAddress* remote_address = nullptr);
+  Result<StreamSocket> accept(SocketAddress* remote_address = nullptr);
 };
 
 class Poller {
