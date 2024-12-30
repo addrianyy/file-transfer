@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <span>
-#include <string>
+#include <string_view>
 
 #include "Address.hpp"
 #include "Status.hpp"
@@ -48,7 +48,7 @@ struct IpResolver {
 
     constexpr operator bool() const { return status.success(); }
   };
-  [[nodiscard]] static ResolveIpV4Result resolve_ipv4(const std::string& hostname);
+  [[nodiscard]] static ResolveIpV4Result resolve_ipv4(std::string_view hostname);
 
   struct ResolveIpV6Result {
     Status status{};
@@ -56,7 +56,7 @@ struct IpResolver {
 
     constexpr operator bool() const { return status.success(); }
   };
-  [[nodiscard]] static ResolveIpV6Result resolve_ipv6(const std::string& hostname);
+  [[nodiscard]] static ResolveIpV6Result resolve_ipv6(std::string_view hostname);
 };
 
 class Socket {
@@ -113,7 +113,7 @@ class SocketDatagram : public detail::RwSocket {
     const BindParameters& bind_parameters = BindParameters::default_parameters());
   [[nodiscard]] static BindResult bind(
     IpVersion ip_version,
-    const std::string& hostname,
+    std::string_view hostname,
     uint16_t port,
     const BindParameters& bind_parameters = BindParameters::default_parameters());
 
@@ -175,7 +175,7 @@ class SocketStream : public detail::RwSocket {
     const ConnectParameters& connect_parameters = ConnectParameters::default_parameters());
   [[nodiscard]] static ConnectResult connect(
     IpVersion ip_version,
-    const std::string& hostname,
+    std::string_view hostname,
     uint16_t port,
     const ConnectParameters& connect_parameters = ConnectParameters::default_parameters());
 
@@ -224,7 +224,7 @@ class Listener : public Socket {
     const BindParameters& bind_parameters = BindParameters::default_parameters());
   [[nodiscard]] static BindResult bind(
     IpVersion ip_version,
-    const std::string& hostname,
+    std::string_view hostname,
     uint16_t port,
     const BindParameters& bind_parameters = BindParameters::default_parameters());
 

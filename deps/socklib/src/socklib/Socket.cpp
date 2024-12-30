@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <string>
 #include <vector>
 
 #if defined(_WIN32)
@@ -360,15 +361,17 @@ static sock::Status setup_socket(sock::detail::RawSocket socket,
 }
 
 template <typename TResult, typename TAddress>
-static TResult resolve_ip_generic(int family, const std::string& hostname) {
+static TResult resolve_ip_generic(int family, std::string_view hostname) {
   addrinfo* resolved{};
   addrinfo hints{};
 
   hints.ai_family = family;
   hints.ai_flags = AI_V4MAPPED | AI_ADDRCONFIG;
 
+  const auto hostname_s = std::string(hostname);
+
   // Different return value semantics, check if != 0.
-  const auto addrinfo_result = ::getaddrinfo(hostname.c_str(), nullptr, &hints, &resolved);
+  const auto addrinfo_result = ::getaddrinfo(hostname_s.c_str(), nullptr, &hints, &resolved);
   if (addrinfo_result != 0) {
     return {
       .status = {sock::ErrorCode::HostnameNotFound},
@@ -401,17 +404,17 @@ static TResult resolve_ip_generic(int family, const std::string& hostname) {
   };
 }
 
-sock::IpResolver::ResolveIpV4Result sock::IpResolver::resolve_ipv4(const std::string& hostname) {
+sock::IpResolver::ResolveIpV4Result sock::IpResolver::resolve_ipv4(std::string_view hostname) {
   return resolve_ip_generic<ResolveIpV4Result, SocketIpV4Address>(AF_INET, hostname);
 }
 
-sock::IpResolver::ResolveIpV6Result sock::IpResolver::resolve_ipv6(const std::string& hostname) {
+sock::IpResolver::ResolveIpV6Result sock::IpResolver::resolve_ipv6(std::string_view hostname) {
   return resolve_ip_generic<ResolveIpV6Result, SocketIpV6Address>(AF_INET6, hostname);
 }
 
 template <typename Result, typename Fn>
 static Result resolve_and_run(sock::IpVersion ip_version,
-                              const std::string& hostname,
+                              std::string_view hostname,
                               uint16_t port,
                               Fn&& callback) {
   switch (ip_version) {
@@ -512,7 +515,7 @@ sock::SocketDatagram::BindResult sock::SocketDatagram::bind(const SocketAddress&
 }
 
 sock::SocketDatagram::BindResult sock::SocketDatagram::bind(IpVersion ip_version,
-                                                            const std::string& hostname,
+                                                            std::string_view hostname,
                                                             uint16_t port,
                                                             const BindParameters& bind_parameters) {
   return resolve_and_run<BindResult>(
@@ -688,7 +691,7 @@ sock::SocketStream::ConnectResult sock::SocketStream::connect(
 
 sock::SocketStream::ConnectResult sock::SocketStream::connect(
   IpVersion ip_version,
-  const std::string& hostname,
+  std::string_view hostname,
   uint16_t port,
   const ConnectParameters& connect_parameters) {
   return resolve_and_run<ConnectResult>(ip_version, hostname, port,
@@ -827,7 +830,7 @@ sock::Listener::BindResult sock::Listener::bind(const SocketAddress& address,
 }
 
 sock::Listener::BindResult sock::Listener::bind(IpVersion ip_version,
-                                                const std::string& hostname,
+                                                std::string_view hostname,
                                                 uint16_t port,
                                                 const BindParameters& bind_parameters) {
   return resolve_and_run<BindResult>(
