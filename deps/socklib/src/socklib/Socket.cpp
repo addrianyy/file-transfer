@@ -49,6 +49,8 @@ enum class ErrorSource {
   Send,
   Connect,
   FcntlOrIoctlsocket,
+  GetSockName,
+  GetPeerName,
   Getaddrinfo,
   Setsockopt,
   Poll,
@@ -490,6 +492,38 @@ sock::Status sock::Socket::set_non_blocking(bool non_blocking) {
 #endif
 }
 
+sock::Status sock::Socket::local_address(SocketAddress& address) const {
+  SockaddrBuffer socket_address;
+  socklen_t socket_address_length = sizeof(socket_address);
+
+  if (is_error(::getsockname(raw_socket_, reinterpret_cast<sockaddr*>(socket_address.data),
+                             &socket_address_length))) {
+    return last_error_to_status(ErrorCode::GetLocalAddressFailed, ErrorSource::GetSockName);
+  }
+
+  if (!socket_address_convert_from_raw(socket_address, address)) {
+    return Status{ErrorCode::GetLocalAddressFailed, ErrorCode::AddressConversionFailed};
+  }
+
+  return {};
+}
+
+sock::Status sock::Socket::peer_address(SocketAddress& address) const {
+  SockaddrBuffer socket_address;
+  socklen_t socket_address_length = sizeof(socket_address);
+
+  if (is_error(::getpeername(raw_socket_, reinterpret_cast<sockaddr*>(socket_address.data),
+                             &socket_address_length))) {
+    return last_error_to_status(ErrorCode::GetPeerAddressFailed, ErrorSource::GetPeerName);
+  }
+
+  if (!socket_address_convert_from_raw(socket_address, address)) {
+    return Status{ErrorCode::GetPeerAddressFailed, ErrorCode::AddressConversionFailed};
+  }
+
+  return {};
+}
+
 sock::Status sock::detail::RwSocket::set_receive_timeout_ms(uint64_t timeout_ms) {
   return set_socket_option_timeout_ms(raw_socket_, SOL_SOCKET, SO_RCVTIMEO, timeout_ms);
 }
@@ -549,7 +583,7 @@ sock::Result<sock::DatagramSocket> sock::DatagramSocket::bind(
     [&](const SocketAddress& resolved_address) { return bind(resolved_address, bind_parameters); });
 }
 
-sock::Result<sock::DatagramSocket> sock::DatagramSocket::anonymous(
+sock::Result<sock::DatagramSocket> sock::DatagramSocket::create(
   SocketAddress::Type type,
   const CreateParameters& create_parameters) {
   const auto datagram_socket = ::socket(address_type_to_protocol(type), SOCK_DGRAM, 0);

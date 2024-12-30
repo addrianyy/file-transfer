@@ -10,6 +10,8 @@ X(IpResolveFailed)
 X(ReceiveFailed)
 X(SendFailed)
 X(SocketSetupFailed)
+X(GetLocalAddressFailed)
+X(GetPeerAddressFailed)
 
 X(InvalidAddressType)
 X(SizeTooLarge)

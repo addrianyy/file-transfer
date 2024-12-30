@@ -65,7 +65,24 @@ class Socket {
   bool valid() const;
   operator bool() const { return valid(); }
 
-  [[nodiscard]] Status set_non_blocking(bool non_blocking);
+  Status set_non_blocking(bool non_blocking);
+
+  Status local_address(SocketAddress& address) const;
+  Status peer_address(SocketAddress& address) const;
+
+  template <typename T>
+  Result<T> local_address() const {
+    T address{};
+    const auto status = local_address(address);
+    return {.status = status, .address = address};
+  }
+
+  template <typename T>
+  Result<T> peer_address() const {
+    T address{};
+    const auto status = peer_address(address);
+    return {.status = status, .address = address};
+  }
 };
 
 namespace detail {
@@ -103,7 +120,7 @@ class DatagramSocket : public detail::RwSocket {
   struct CreateParameters {
     constexpr static CreateParameters default_parameters() { return CreateParameters{}; }
   };
-  static Result<DatagramSocket> anonymous(
+  static Result<DatagramSocket> create(
     SocketAddress::Type type,
     const CreateParameters& create_parameters = CreateParameters::default_parameters());
 
