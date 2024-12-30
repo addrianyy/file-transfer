@@ -1,12 +1,26 @@
 #include "Status.hpp"
 
-std::string_view sock::Status::stringify_error_code(ErrorCode error_code) {
-  switch (error_code) {
-#define X(variant)               \
-  case sock::ErrorCode::variant: \
+std::string_view sock::Status::stringify_error(Error error) {
+  switch (error) {
+#define X(variant)           \
+  case sock::Error::variant: \
     return #variant;
 
-#include "ErrorCodes.inc"
+#include "Errors.inc"
+
+#undef X
+
+    default:
+      return "<unknown>";
+  }
+}
+std::string_view sock::Status::stringify_error(SystemError system_error) {
+  switch (system_error) {
+#define X(variant)                 \
+  case sock::SystemError::variant: \
+    return #variant;
+
+#include "SystemErrors.inc"
 
 #undef X
 
@@ -16,17 +30,15 @@ std::string_view sock::Status::stringify_error_code(ErrorCode error_code) {
 }
 
 std::string sock::Status::stringify() const {
-  const auto main_error_string = stringify_error_code(error);
-  const auto sub_error_string = stringify_error_code(sub_error);
+  auto stringified = std::string(stringify_error(error));
 
-  std::string stringified;
-  if (sub_error == ErrorCode::Success) {
-    stringified.assign(main_error_string);
-  } else {
-    stringified.reserve(main_error_string.size() + sub_error_string.size() + 3);
-    stringified += main_error_string;
+  if (sub_error != Error::None) {
+    stringified += " / ";
+    stringified += stringify_error(sub_error);
+  }
+  if (system_error != SystemError::None) {
     stringified += " (";
-    stringified += sub_error_string;
+    stringified += stringify_error(system_error);
     stringified += ')';
   }
 

@@ -5,7 +5,7 @@ namespace net {
 bool Connection::send_packet_internal(std::span<const uint8_t> data) {
   const auto [status, bytes_sent] = socket.send_all(data);
   if (!status) {
-    if (status.has_code(sock::ErrorCode::Disconnected)) {
+    if (status.disconnected()) {
       disconnect();
     } else {
       error(ErrorType::SocketSendError, status);
@@ -35,7 +35,7 @@ void Connection::update() {
   frame_receiver.receive([&](std::span<uint8_t> receive_buffer) {
     const auto [status, bytes_received] = socket.receive(receive_buffer);
     if (!status) {
-      if (status.has_code(sock::ErrorCode::Disconnected)) {
+      if (status.disconnected()) {
         disconnect();
       } else {
         error(ErrorType::SocketReceiveError, status);

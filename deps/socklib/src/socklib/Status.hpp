@@ -4,25 +4,38 @@
 
 namespace sock {
 
-enum class ErrorCode {
+enum class Error {
 #define X(variant) variant,
 
-#include "ErrorCodes.inc"
+#include "Errors.inc"
+
+#undef X
+};
+
+enum class SystemError {
+#define X(variant) variant,
+
+#include "SystemErrors.inc"
 
 #undef X
 };
 
 struct [[nodiscard]] Status {
-  ErrorCode error;
-  ErrorCode sub_error;
+  Error error{};
+  Error sub_error{};
+  SystemError system_error{};
 
-  constexpr bool would_block() const { return has_code(ErrorCode::WouldBlock); }
+  constexpr bool has_error(Error code) const { return error == code || sub_error == code; }
+  constexpr bool has_error(SystemError code) const { return system_error == code; }
 
-  constexpr bool has_code(ErrorCode code) const { return error == code || sub_error == code; }
-  constexpr bool success() const { return error == ErrorCode::Success; }
+  constexpr bool success() const { return error == Error::None; }
   constexpr operator bool() const { return success(); }
 
-  static std::string_view stringify_error_code(ErrorCode error_code);
+  constexpr bool would_block() const { return has_error(SystemError::WouldBlock); }
+  constexpr bool disconnected() const { return has_error(SystemError::Disconnected); }
+
+  static std::string_view stringify_error(Error error);
+  static std::string_view stringify_error(SystemError system_error);
 
   std::string stringify() const;
 };

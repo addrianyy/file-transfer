@@ -5,5 +5,6 @@ target_sources(socklib PUBLIC
     Socket.hpp
     Status.cpp
     Status.hpp
-    ErrorCodes.inc
+    Errors.inc
+    SystemErrors.inc
 )
