@@ -22,7 +22,7 @@ std::span<uint8_t> FrameReceiver::prepare_receive_buffer() {
     const auto missing_size = receive_buffer_size - remaining_size;
     buffer.resize(buffer.size() + missing_size);
   }
-  return std::span(buffer).subspan(used_size, receive_buffer_size);
+  return buffer.span().subspan(used_size, receive_buffer_size);
 }
 
 void FrameReceiver::commit_received_data(size_t size) {
@@ -31,7 +31,7 @@ void FrameReceiver::commit_received_data(size_t size) {
 }
 
 std::pair<FrameReceiver::Result, BinaryReader> FrameReceiver::update() {
-  const auto received_data = std::span(buffer).subspan(0, used_size);
+  const auto received_data = buffer.span().subspan(0, used_size);
 
   if (pending_frame_size == invalid_size && received_data.size() >= frame_header_size) {
     BinaryReader reader{received_data};
@@ -63,7 +63,7 @@ std::pair<FrameReceiver::Result, BinaryReader> FrameReceiver::update() {
 }
 
 void FrameReceiver::discard_frame() {
-  const auto received_data = std::span(buffer).subspan(0, used_size);
+  const auto received_data = buffer.span().subspan(0, used_size);
 
   if (pending_frame_size != invalid_size && received_data.size() >= pending_frame_size) {
     const auto frame_size = pending_frame_size;
@@ -96,7 +96,7 @@ std::span<const uint8_t> FrameSender::finalize() {
 
   std::memcpy(buffer.data() + 4, frame_size_bytes.data(), frame_size_bytes.size());
 
-  return buffer;
+  return buffer.span();
 }
 
 }  // namespace net::framing

@@ -5,11 +5,13 @@
 #include <span>
 #include <vector>
 
+#include <helpers/ByteBuffer.hpp>
+
 class BinaryWriter {
-  std::vector<uint8_t>& buffer;
+  ByteBuffer& buffer;
 
  public:
-  explicit BinaryWriter(std::vector<uint8_t>& buffer);
+  explicit BinaryWriter(ByteBuffer& buffer);
 
   size_t written_size() const;
 

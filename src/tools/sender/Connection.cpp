@@ -81,7 +81,7 @@ void Connection::upload_accepted_file() {
     compression_buffer.clear();
   }
 
-  size_t pending_uncompressed_size = 0;
+  uint64_t pending_uncompressed_size = 0;
 
   const auto flush_compression_buffer = [&]() {
     if (!compression_buffer.empty()) {

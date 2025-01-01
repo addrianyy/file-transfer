@@ -4,8 +4,8 @@
 #include <functional>
 
 class TransferTracker {
-  constexpr static size_t sample_window_in_seconds = 16;
-  constexpr static size_t samples_per_second = 5;
+  constexpr static size_t sample_window_in_seconds = 10;
+  constexpr static size_t samples_per_second = 20;
   constexpr static size_t max_sample_count = sample_window_in_seconds * samples_per_second;
 
   constexpr static base::PreciseTime sampling_interval =
@@ -35,6 +35,8 @@ class TransferTracker {
   size_t next_sample_index = 0;
 
   void add_sample(const Sample& sample);
+
+  bool get_min_max_sample(Sample& min_sample, Sample& max_sample) const;
 
   double calculate_download_speed(base::PreciseTime now) const;
 

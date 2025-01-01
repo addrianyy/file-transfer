@@ -3,18 +3,14 @@
 
 #include <cstring>
 
-BinaryWriter::BinaryWriter(std::vector<uint8_t>& buffer) : buffer(buffer) {}
+BinaryWriter::BinaryWriter(ByteBuffer& buffer) : buffer(buffer) {}
 
 size_t BinaryWriter::written_size() const {
   return buffer.size();
 }
 
 void BinaryWriter::write_bytes(std::span<const uint8_t> bytes) {
-  if (!bytes.empty()) {
-    const auto previous_size = buffer.size();
-    buffer.resize(previous_size + bytes.size());
-    std::memcpy(buffer.data() + previous_size, bytes.data(), bytes.size());
-  }
+  buffer.append(bytes);
 }
 
 void BinaryWriter::write_u8(uint8_t v) {

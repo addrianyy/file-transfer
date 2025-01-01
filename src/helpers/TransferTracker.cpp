@@ -17,8 +17,32 @@ void TransferTracker::add_sample(const Sample& sample) {
   }
 }
 
-double TransferTracker::calculate_download_speed(base::PreciseTime now) const {
+bool TransferTracker::get_min_max_sample(Sample& min_sample, Sample& max_sample) const {
   if (samples.size() < 2) {
+    return false;
+  }
+
+  if (samples.size() < max_sample_count) {
+    min_sample = samples[0];
+    max_sample = samples[samples.size() - 1];
+    return true;
+  }
+
+  const size_t min_sample_index = next_sample_index;
+  const size_t max_sample_index =
+    next_sample_index == 0 ? samples.size() - 1 : next_sample_index - 1;
+
+  min_sample = samples[min_sample_index];
+  max_sample = samples[max_sample_index];
+
+  return true;
+}
+
+double TransferTracker::calculate_download_speed(base::PreciseTime now) const {
+  // Calculate download speed using moving average.
+  // TODO: Handle situation where there are no recent samples
+  Sample min_sample, max_sample;
+  if (!get_min_max_sample(min_sample, max_sample)) {
     // Not enough samples for moving average.
     const auto transfer_time = now - state_.start_time;
     const auto download_speed =
@@ -27,25 +51,8 @@ double TransferTracker::calculate_download_speed(base::PreciseTime now) const {
     return download_speed;
   }
 
-  // Calculate download speed using moving average.
-  // TODO: Remove old entries.
-
-  base::PreciseTime min_time = samples[0].time;
-  base::PreciseTime max_time = min_time;
-
-  uint64_t min_size = samples[0].transferred_size;
-  uint64_t max_size = min_size;
-
-  for (const auto& sample : samples) {
-    min_time = std::min(min_time, sample.time);
-    max_time = std::max(max_time, sample.time);
-
-    min_size = std::min(min_size, sample.transferred_size);
-    max_size = std::max(max_size, sample.transferred_size);
-  }
-
-  const auto transfer_time = max_time - min_time;
-  const auto transfered_size = max_size - min_size;
+  const auto transfer_time = max_sample.time - min_sample.time;
+  const auto transfered_size = max_sample.transferred_size - min_sample.transferred_size;
 
   return double(transfered_size) / std::max(transfer_time.seconds(), 0.0001);
 }
