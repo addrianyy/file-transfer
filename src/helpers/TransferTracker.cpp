@@ -40,7 +40,6 @@ bool TransferTracker::get_min_max_sample(Sample& min_sample, Sample& max_sample)
 
 double TransferTracker::calculate_download_speed(base::PreciseTime now) const {
   // Calculate download speed using moving average.
-  // TODO: Handle situation where there are no recent samples
   Sample min_sample, max_sample;
   if (!get_min_max_sample(min_sample, max_sample)) {
     // Not enough samples for moving average.
@@ -51,7 +50,20 @@ double TransferTracker::calculate_download_speed(base::PreciseTime now) const {
     return download_speed;
   }
 
-  const auto transfer_time = max_sample.time - min_sample.time;
+  auto newest_sample_time = max_sample.time;
+  const auto time_since_newest_sample = now - newest_sample_time;
+
+  // No samples were received in the sampling window.
+  if (time_since_newest_sample >= base::PreciseTime::from_seconds(sample_window_in_seconds + 1)) {
+    return 0.0;
+  }
+
+  // Too long passed since last sample, take it into account.
+  if (time_since_newest_sample >= base::PreciseTime::from_seconds(0.25f)) {
+    newest_sample_time = now;
+  }
+
+  const auto transfer_time = newest_sample_time - min_sample.time;
   const auto transfered_size = max_sample.transferred_size - min_sample.transferred_size;
 
   return double(transfered_size) / std::max(transfer_time.seconds(), 0.0001);
