@@ -50,13 +50,16 @@ double TransferTracker::calculate_download_speed(base::PreciseTime now) const {
   return double(transfered_size) / std::max(transfer_time.seconds(), 0.0001);
 }
 
-void TransferTracker::begin(const std::string& transfer_name, uint64_t transfer_size) {
+void TransferTracker::begin(const std::string& transfer_name,
+                            uint64_t transfer_size,
+                            bool is_compressed) {
   const auto now = base::PreciseTime::now();
 
   state_ = {
     .name = transfer_name,
     .transferred_size = 0,
     .total_size = transfer_size,
+    .is_compressed = is_compressed,
     .start_time = now,
     .last_report_time = now,
     .last_sample_time = now,
@@ -70,15 +73,16 @@ void TransferTracker::begin(const std::string& transfer_name, uint64_t transfer_
   {
     const auto [readable_size, size_units] =
       SizeFormatter::bytes_to_readable_units(state_.total_size);
-    display_callback(base::format("{} file `{}` ({:.1f} {})...", transfer_verb, state_.name,
-                                  readable_size, size_units));
+    display_callback(base::format("{} file `{}` {}({:.1f} {})...", transfer_verb, state_.name,
+                                  is_compressed ? "[compressed] " : "", readable_size, size_units));
   }
 }
 
-void TransferTracker::progress(uint64_t chunk_size) {
+void TransferTracker::progress(uint64_t chunk_size, uint64_t compressed_size) {
   const auto now = base::PreciseTime::now();
 
   state_.transferred_size += chunk_size;
+  state_.transferred_compressed_size += compressed_size;
 
   if (now - state_.last_sample_time >= sampling_interval) {
     add_sample(Sample{
@@ -128,9 +132,18 @@ void TransferTracker::end() {
     const auto [readable_speed, speed_units] =
       SizeFormatter::bytes_to_readable_units(uint64_t(transfer_speed));
 
-    display_callback(base::format("finished {} file `{}` ({:.1f} {}) in {} ({:.1f} {}/s)",
+    std::string compression_info{};
+    if (state_.is_compressed) {
+      const auto compression_ratio =
+        state_.total_size == 0
+          ? 0
+          : (float(state_.transferred_compressed_size) / float(state_.total_size));
+      compression_info = base::format(", compression {:.1f}%", compression_ratio * 100.f);
+    }
+
+    display_callback(base::format("finished {} file `{}` ({:.1f} {}) in {} ({:.1f} {}/s){}",
                                   transfer_verb, state_.name, readable_size, size_units,
-                                  transfer_time, readable_speed, speed_units));
+                                  transfer_time, readable_speed, speed_units, compression_info));
   }
 
   state_ = {};

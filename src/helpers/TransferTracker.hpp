@@ -18,7 +18,9 @@ class TransferTracker {
   struct State {
     std::string name;
     uint64_t transferred_size{};
+    uint64_t transferred_compressed_size{};
     uint64_t total_size{};
+    bool is_compressed{};
     base::PreciseTime start_time{};
     base::PreciseTime last_report_time{};
     base::PreciseTime last_sample_time{};
@@ -40,7 +42,7 @@ class TransferTracker {
   explicit TransferTracker(std::string transfer_verb,
                            std::function<void(std::string_view)> display_callback);
 
-  void begin(const std::string& transfer_name, uint64_t transfer_size);
-  void progress(uint64_t chunk_size);
+  void begin(const std::string& transfer_name, uint64_t transfer_size, bool is_compressed);
+  void progress(uint64_t chunk_size, uint64_t compressed_size);
   void end();
 };

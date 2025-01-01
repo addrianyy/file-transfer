@@ -3,6 +3,7 @@
 #include <base/Log.hpp>
 #include <base/io/TerminalColors.hpp>
 
+#include <algorithm>
 #include <filesystem>
 
 #define TERMINAL_COLOR_IP(x) TERMINAL_COLOR_GREEN(x)
@@ -70,7 +71,9 @@ bool Connection::create_directory(std::string_view virtual_path) {
   }
 }
 
-bool Connection::start_file_download(std::string_view virtual_path, uint64_t file_size) {
+bool Connection::start_file_download(std::string_view virtual_path,
+                                     uint64_t file_size,
+                                     uint16_t flags) {
   std::string fs_path;
   if (!to_fs_path(virtual_path, fs_path)) {
     protocol_error(base::format("failed to convert `{}` to filesystem path", virtual_path));
@@ -88,6 +91,11 @@ bool Connection::start_file_download(std::string_view virtual_path, uint64_t fil
     return false;
   }
 
+  const bool is_compressed = (flags & net::packets::CreateFile::flag_compressed) != 0;
+  if (is_compressed) {
+    ZSTD_DCtx_reset(decompression_context, ZSTD_reset_session_only);
+  }
+
   state = State::Downloading;
   download = Download{
     .file = std::move(file),
@@ -95,11 +103,11 @@ bool Connection::start_file_download(std::string_view virtual_path, uint64_t fil
     .fs_path = fs_path,
     .file_size = file_size,
     .downloaded_size = 0,
+    .is_compressed = is_compressed,
   };
 
   download_hasher.reset();
-
-  download_tracker.begin(std::string(virtual_path), file_size);
+  download_tracker.begin(std::string(virtual_path), file_size, is_compressed);
 
   if (file_size == 0) {
     finish_chunks_download();
@@ -108,22 +116,48 @@ bool Connection::start_file_download(std::string_view virtual_path, uint64_t fil
   return true;
 }
 
-void Connection::process_downloaded_chunk(std::span<const uint8_t> chunk) {
+void Connection::process_downloaded_chunk(std::span<const uint8_t> download_chunk) {
   auto& down = *download;
 
-  if (down.file.write(chunk) != chunk.size()) {
+  std::span<const uint8_t> file_chunk = download_chunk;
+
+  if (down.is_compressed) {
+    decompression_buffer.clear();
+
+    const auto base_step_size = std::max(size_t(4096), file_chunk.size());
+
+    ZSTD_inBuffer input{download_chunk.data(), download_chunk.size(), 0};
+    while (input.pos < input.size) {
+      const auto current_step_size =
+        std::max(decompression_buffer.unused_capacity(), base_step_size);
+
+      const auto previous_size = decompression_buffer.size();
+      decompression_buffer.resize(previous_size + current_step_size);
+
+      ZSTD_outBuffer output{decompression_buffer.data() + previous_size, current_step_size, 0};
+
+      if (ZSTD_isError(ZSTD_decompressStream(decompression_context, &output, &input))) {
+        return protocol_error("failed to decompress the file chunk");
+      }
+
+      decompression_buffer.resize(previous_size + output.pos);
+    }
+
+    file_chunk = decompression_buffer.span();
+  }
+
+  if (down.file.write(file_chunk) != file_chunk.size()) {
     return protocol_error(base::format("failed to write to file `{}`", down.fs_path));
   }
 
-  down.downloaded_size += chunk.size();
+  down.downloaded_size += file_chunk.size();
   if (down.downloaded_size > down.file_size) {
     return protocol_error(
       base::format("got more file data for `{}` than expected", down.virtual_path));
   }
 
-  download_hasher.feed(chunk);
-
-  download_tracker.progress(chunk.size());
+  download_hasher.feed(file_chunk);
+  download_tracker.progress(file_chunk.size(), download_chunk.size());
 
   if (down.downloaded_size == down.file_size) {
     finish_chunks_download();
@@ -180,7 +214,7 @@ void Connection::on_packet_received(const net::packets::CreateDirectory& packet)
 
 void Connection::on_packet_received(const net::packets::CreateFile& packet) {
   if (state == State::Idle) {
-    const auto started = start_file_download(packet.path, packet.size);
+    const auto started = start_file_download(packet.path, packet.size, packet.flags);
     send_packet(net::packets::Acknowledged{
       .accepted = started,
     });
@@ -214,8 +248,13 @@ Connection::Connection(sock::StreamSocket socket,
     : net::ProtocolConnection(std::move(socket)),
       peer_address(std::move(peer_address)),
       receive_directory(std::move(receive_directory)),
+      decompression_context(ZSTD_createDCtx()),
       download_tracker("downloading", [this](std::string_view message) {
         log_info(TERMINAL_COLOR_IP("{}") ": {}", this->peer_address, message);
       }) {}
+
+Connection::~Connection() {
+  ZSTD_freeDCtx(decompression_context);
+}
 
 }  // namespace receiver

@@ -71,6 +71,11 @@ void net::ProtocolConnection::on_packet_received(BinaryReader reader) {
         return protocol_error("failed to deserialize create file packet size");
       }
 
+      uint16_t flags{};
+      if (!reader.read_u16(flags)) {
+        return protocol_error("failed to deserialize create file packet size");
+      }
+
       std::string_view path;
       if (!read_string(reader, path)) {
         return protocol_error("failed to deserialize create file packet path");
@@ -79,6 +84,7 @@ void net::ProtocolConnection::on_packet_received(BinaryReader reader) {
       return dispatch(packets::CreateFile{
         .path = path,
         .size = size,
+        .flags = flags,
       });
     }
     case PacketID::FileChunk: {
@@ -128,6 +134,7 @@ void net::ProtocolConnection::serialize_packet(BinaryWriter& writer,
                                                const packets::CreateFile& packet) {
   write_packet_id(writer, PacketID::CreateFile);
   writer.write_u64(packet.size);
+  writer.write_u16(packet.flags);
   write_string(writer, packet.path);
 }
 void net::ProtocolConnection::serialize_packet(BinaryWriter& writer,

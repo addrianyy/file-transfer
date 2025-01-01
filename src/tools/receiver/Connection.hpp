@@ -1,18 +1,24 @@
 #pragma once
 #include <net/protocol/ProtocolConnection.hpp>
 
+#include <helpers/ByteBuffer.hpp>
 #include <helpers/Hasher.hpp>
 #include <helpers/TransferTracker.hpp>
 
 #include <base/io/File.hpp>
+#include <base/macro/ClassTraits.hpp>
 
 #include <optional>
+
+#include <zstd.h>
 
 namespace receiver {
 
 class Connection : public net::ProtocolConnection {
   std::string peer_address{};
   std::string receive_directory{};
+
+  ZSTD_DCtx* decompression_context{};
 
   enum class State {
     WaitingForHello,
@@ -30,10 +36,14 @@ class Connection : public net::ProtocolConnection {
 
     uint64_t file_size = 0;
     uint64_t downloaded_size = 0;
+
+    bool is_compressed = false;
   };
   std::optional<Download> download;
   Hasher download_hasher;
   TransferTracker download_tracker;
+
+  ByteBuffer decompression_buffer;
 
  protected:
   void cleanup();
@@ -44,8 +54,8 @@ class Connection : public net::ProtocolConnection {
   bool to_fs_path(std::string_view virtual_path, std::string& fs_path);
 
   bool create_directory(std::string_view virtual_path);
-  bool start_file_download(std::string_view virtual_path, uint64_t file_size);
-  void process_downloaded_chunk(std::span<const uint8_t> chunk);
+  bool start_file_download(std::string_view virtual_path, uint64_t file_size, uint16_t flags);
+  void process_downloaded_chunk(std::span<const uint8_t> download_chunk);
   void finish_chunks_download();
   bool verify_file(uint64_t hash);
 
@@ -58,9 +68,12 @@ class Connection : public net::ProtocolConnection {
   void on_packet_received(const net::packets::VerifyFile& packet) override;
 
  public:
+  CLASS_NON_COPYABLE_NON_MOVABLE(Connection)
+
   explicit Connection(sock::StreamSocket socket,
                       std::string peer_address,
                       std::string receive_directory);
+  ~Connection() override;
 };
 
 }  // namespace receiver

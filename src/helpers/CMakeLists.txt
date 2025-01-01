@@ -9,4 +9,6 @@ target_sources(ft PUBLIC
     TransferTracker.hpp
     Hasher.cpp
     Hasher.hpp
+    ByteBuffer.cpp
+    ByteBuffer.hpp
 )

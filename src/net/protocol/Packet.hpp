@@ -31,8 +31,11 @@ struct CreateDirectory {
 };
 
 struct CreateFile {
+  constexpr static uint16_t flag_compressed = 1 << 0;
+
   std::string_view path;
   uint64_t size{};
+  uint16_t flags{};
 };
 
 struct FileChunk {
