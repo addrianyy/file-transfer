@@ -219,8 +219,8 @@ class Poller {
     QueryEvents query_events{};
     StatusEvents status_events{};
 
-    bool has_all_status_events(StatusEvents events) const;
-    bool has_one_of_status_events(StatusEvents events) const;
+    bool has_events(StatusEvents events) const;
+    bool has_any_event(StatusEvents events) const;
   };
 
   virtual Result<size_t> poll(std::span<PollEntry> entries, int timeout_ms) = 0;

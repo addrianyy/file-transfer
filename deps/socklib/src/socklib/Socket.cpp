@@ -948,8 +948,10 @@ class PollerImpl : public sock::Poller {
     raw_entries.resize(entries.size());
 
     for (size_t i = 0; i < entries.size(); i++) {
-      const auto& source = entries[i];
+      auto& source = entries[i];
       auto& dest = raw_entries[i];
+
+      source.status_events = {};
 
       dest.fd = source.socket ? sock::detail::RawSocketAccessor::get(*source.socket)
                               : sock::detail::RawSocket(-1);
@@ -964,16 +966,14 @@ class PollerImpl : public sock::Poller {
     }
 
 #if defined(SOCKLIB_WINDOWS)
-    const auto result = ::WSAPoll(raw_entries.data(), ULONG(raw_entries.size()), timeout_ms);
+    const auto result =
+      handle_eintr([&] { ::WSAPoll(raw_entries.data(), ULONG(raw_entries.size()), timeout_ms); });
 #else
-    const auto result = ::poll(raw_entries.data(), int(raw_entries.size()), timeout_ms);
+    const auto result =
+      handle_eintr([&] { return ::poll(raw_entries.data(), int(raw_entries.size()), timeout_ms); });
 #endif
 
     if (is_error(result)) {
-      for (auto& entry : entries) {
-        entry.status_events = {};
-      }
-
       return {
         .status = last_error_to_status(sock::Error::PollFailed, ErrorSource::Poll),
       };
@@ -981,9 +981,11 @@ class PollerImpl : public sock::Poller {
 
     for (size_t i = 0; i < entries.size(); i++) {
       const auto& source = raw_entries[i];
-      auto& dest = entries[i];
+      if (!source.revents) {
+        continue;
+      }
 
-      dest.status_events = {};
+      auto& dest = entries[i];
 
       const auto set_event = [&](int raw_flag, StatusEvents flag) {
         if (source.revents & raw_flag) {
@@ -1008,10 +1010,10 @@ class PollerImpl : public sock::Poller {
 std::unique_ptr<sock::Poller> sock::Poller::create() {
   return std::make_unique<PollerImpl>();
 }
-bool sock::Poller::PollEntry::has_all_status_events(StatusEvents events) const {
+bool sock::Poller::PollEntry::has_events(StatusEvents events) const {
   return (status_events & events) == events;
 }
-bool sock::Poller::PollEntry::has_one_of_status_events(StatusEvents events) const {
+bool sock::Poller::PollEntry::has_any_event(StatusEvents events) const {
   return (status_events & events) != StatusEvents::None;
 }
 
