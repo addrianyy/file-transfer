@@ -1,4 +1,5 @@
 #include "Sender.hpp"
+#include "CompressionEnv.hpp"
 #include "Connection.hpp"
 
 #include <socklib/Socket.hpp>
@@ -41,6 +42,9 @@ bool tools::sender::run(std::span<const std::string_view> args) {
     return false;
   }
   log_info("number of entries to send: {}", send_entries.size());
+
+  log_info("compression is {} (set `FT_DISABLE_COMPRESSION` to change it)",
+           CompressionEnv::is_compression_enabled() ? "enabled" : "disabled");
 
   auto [connect_status, connection_socket] =
     sock::StreamSocket::connect(tools::IpAddress::Version, address, port);

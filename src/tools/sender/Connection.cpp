@@ -1,14 +1,27 @@
 #include "Connection.hpp"
+#include "CompressionEnv.hpp"
 
 #include <base/Log.hpp>
 #include <base/Panic.hpp>
 
 #include <algorithm>
+#include <cctype>
+#include <filesystem>
+#include <string_view>
+#include <vector>
 
 namespace sender {
 
 constexpr static size_t max_chunk_size = 128 * 1024;
 constexpr static size_t max_compressed_chunk_size = 64 * 1024;
+
+static std::string get_lowercase_file_extension(std::string_view path) {
+  auto extension = std::string(std::filesystem::path{path}.extension());
+  for (auto& c : extension) {
+    c = char(std::tolower(c));
+  }
+  return extension;
+}
 
 void Connection::on_error(ErrorType type, sock::Status status) {
   log_error("error - {}", status.stringify());
@@ -25,7 +38,30 @@ void Connection::on_disconnected() {
 }
 
 bool Connection::should_compress_file(std::string_view fs_path, size_t size) const {
-  return false;
+  static const std::vector<std::string_view> compressed_extensions = {
+    ".zip",  ".7z",  ".rar", ".dmg", ".gz",  ".xz",  ".bz2", ".png",  ".jpg",
+    ".jpeg", ".mov", ".avi", ".mp4", ".mkv", ".wav", ".ogg", ".webm", ".webp",
+  };
+
+  // Don't compress small files.
+  if (size < 2048) {
+    return false;
+  }
+
+  if (!CompressionEnv::is_compression_enabled()) {
+    return false;
+  }
+
+  const auto extension = get_lowercase_file_extension(fs_path);
+
+  // Don't compress files which should be already compressed.
+  for (const auto compressed_ext : compressed_extensions) {
+    if (compressed_ext == extension) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 void Connection::create_directory(std::string_view virtual_path) {

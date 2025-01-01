@@ -5,4 +5,6 @@ target_sources(ft PUBLIC
     Sender.hpp
     FileListing.cpp
     FileListing.hpp
+    CompressionEnv.cpp
+    CompressionEnv.hpp
 )
