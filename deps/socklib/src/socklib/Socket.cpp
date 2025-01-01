@@ -966,8 +966,8 @@ class PollerImpl : public sock::Poller {
     }
 
 #if defined(SOCKLIB_WINDOWS)
-    const auto result =
-      handle_eintr([&] { ::WSAPoll(raw_entries.data(), ULONG(raw_entries.size()), timeout_ms); });
+    const auto result = handle_eintr(
+      [&] { return ::WSAPoll(raw_entries.data(), ULONG(raw_entries.size()), timeout_ms); });
 #else
     const auto result =
       handle_eintr([&] { return ::poll(raw_entries.data(), int(raw_entries.size()), timeout_ms); });
