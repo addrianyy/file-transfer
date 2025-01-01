@@ -16,7 +16,7 @@ constexpr static size_t max_chunk_size = 128 * 1024;
 constexpr static size_t max_compressed_chunk_size = 64 * 1024;
 
 static std::string get_lowercase_file_extension(std::string_view path) {
-  auto extension = std::string(std::filesystem::path{path}.extension());
+  auto extension = std::filesystem::path{path}.extension().string();
   for (auto& c : extension) {
     c = char(std::tolower(c));
   }
