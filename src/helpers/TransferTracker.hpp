@@ -4,7 +4,7 @@
 #include <functional>
 
 class TransferTracker {
-  constexpr static size_t sample_window_in_seconds = 5;
+  constexpr static size_t sample_window_in_seconds = 10;
   constexpr static size_t samples_per_second = 20;
   constexpr static size_t max_sample_count = sample_window_in_seconds * samples_per_second;
 
