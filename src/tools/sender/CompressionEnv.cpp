@@ -1,7 +1,7 @@
 #include "CompressionEnv.hpp"
 
+#include <cstdlib>
 #include <cstring>
-#include <utility>
 
 bool CompressionEnv::is_compression_enabled() {
   static bool enabled = [] {

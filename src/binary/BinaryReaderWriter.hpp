@@ -3,15 +3,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
-#include <vector>
 
-#include <helpers/ByteBuffer.hpp>
+#include <base/containers/BinaryBuffer.hpp>
 
 class BinaryWriter {
-  ByteBuffer& buffer;
+  base::BinaryBuffer& buffer;
 
  public:
-  explicit BinaryWriter(ByteBuffer& buffer);
+  explicit BinaryWriter(base::BinaryBuffer& buffer);
 
   size_t written_size() const;
 

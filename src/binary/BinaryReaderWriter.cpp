@@ -3,7 +3,7 @@
 
 #include <cstring>
 
-BinaryWriter::BinaryWriter(ByteBuffer& buffer) : buffer(buffer) {}
+BinaryWriter::BinaryWriter(base::BinaryBuffer& buffer) : buffer(buffer) {}
 
 size_t BinaryWriter::written_size() const {
   return buffer.size();

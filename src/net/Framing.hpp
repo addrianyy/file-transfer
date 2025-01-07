@@ -7,14 +7,14 @@
 
 #include <binary/BinaryReaderWriter.hpp>
 
-#include <helpers/ByteBuffer.hpp>
+#include <base/containers/BinaryBuffer.hpp>
 
 namespace net::framing {
 
 class FrameReceiver {
   constexpr static uint32_t invalid_size = std::numeric_limits<uint32_t>::max();
 
-  ByteBuffer buffer;
+  base::BinaryBuffer buffer;
   uint32_t used_size{};
 
   uint32_t receive_buffer_size{16 * 1024};
@@ -44,7 +44,7 @@ class FrameReceiver {
 };
 
 class FrameSender {
-  ByteBuffer buffer;
+  base::BinaryBuffer buffer;
 
  public:
   BinaryWriter prepare();

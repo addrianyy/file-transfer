@@ -3,10 +3,10 @@
 
 #include <net/protocol/ProtocolConnection.hpp>
 
-#include <helpers/ByteBuffer.hpp>
 #include <helpers/Hasher.hpp>
 #include <helpers/TransferTracker.hpp>
 
+#include <base/containers/BinaryBuffer.hpp>
 #include <base/io/File.hpp>
 #include <base/macro/ClassTraits.hpp>
 
@@ -46,8 +46,8 @@ class Connection : public net::ProtocolConnection {
   Hasher upload_hasher;
   TransferTracker upload_tracker;
 
-  ByteBuffer chunk_buffer;
-  ByteBuffer compression_buffer;
+  base::BinaryBuffer chunk_buffer;
+  base::BinaryBuffer compression_buffer;
 
  protected:
   void on_error(ErrorType type, sock::Status status) override;

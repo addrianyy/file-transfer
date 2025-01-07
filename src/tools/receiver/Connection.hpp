@@ -1,10 +1,10 @@
 #pragma once
 #include <net/protocol/ProtocolConnection.hpp>
 
-#include <helpers/ByteBuffer.hpp>
 #include <helpers/Hasher.hpp>
 #include <helpers/TransferTracker.hpp>
 
+#include <base/containers/BinaryBuffer.hpp>
 #include <base/io/File.hpp>
 #include <base/macro/ClassTraits.hpp>
 
@@ -43,7 +43,7 @@ class Connection : public net::ProtocolConnection {
   Hasher download_hasher;
   TransferTracker download_tracker;
 
-  ByteBuffer decompression_buffer;
+  base::BinaryBuffer decompression_buffer;
 
  protected:
   void cleanup();

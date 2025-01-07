@@ -11,4 +11,6 @@ target_sources(baselib PRIVATE
     StartupCallbacks.hpp
     SumType.cpp
     SumType.hpp
+    BinaryBuffer.cpp
+    BinaryBuffer.hpp
 )
