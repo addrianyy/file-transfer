@@ -2,6 +2,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <string>
 
 namespace sock {
 
@@ -26,6 +27,8 @@ class IpV4Address {
       : components_({a, b, c, d}) {}
 
   constexpr std::array<uint8_t, 4> components() const { return components_; }
+
+  std::string stringify() const;
 };
 
 class IpV6Address {
@@ -64,6 +67,8 @@ class IpV6Address {
   }
 
   constexpr std::array<uint16_t, 8> components() const { return components_; }
+
+  std::string stringify() const;
 };
 
 class SocketAddress {
@@ -106,6 +111,8 @@ class SocketIpV4Address : public SocketAddress {
 
   constexpr IpV4Address ip() const { return ip_; }
   constexpr uint16_t port() const { return port_; }
+
+  std::string stringify() const;
 };
 
 class SocketIpV6Address : public SocketAddress {
@@ -132,6 +139,8 @@ class SocketIpV6Address : public SocketAddress {
 
   constexpr IpV6Address ip() const { return ip_; }
   constexpr uint16_t port() const { return port_; }
+
+  std::string stringify() const;
 };
 
 }  // namespace sock

@@ -1,6 +1,8 @@
 #include "Socket.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <cstring>
 #include <limits>
 #include <string>
 #include <vector>
@@ -54,6 +56,7 @@ enum class ErrorSource {
   Getaddrinfo,
   Setsockopt,
   Poll,
+  SocketPair,
 };
 
 static int address_type_to_protocol(sock::SocketAddress::Type type) {
@@ -204,6 +207,8 @@ static sock::SystemError last_error_to_system_error(ErrorSource error_source) {
   const auto error_num = WSAGetLastError();
 
   switch (error_num) {
+    case WSAEISCONN:
+      return EC::AlreadyConnected;
     case WSANOTINITIALISED:
       return EC::NotInitialized;
     case WSAENETDOWN:
@@ -220,6 +225,10 @@ static sock::SystemError last_error_to_system_error(ErrorSource error_source) {
       return EC::TimedOut;
     case WSAEWOULDBLOCK:
       return EC::WouldBlock;
+    case WSAEALREADY:
+      return EC::AlreadyInProgress;
+    case WSAEINPROGRESS:
+      return EC::NowInProgress;
     case WSAEHOSTUNREACH:
       return EC::HostUnreachable;
     case WSAEBADF:
@@ -242,6 +251,8 @@ static sock::SystemError last_error_to_system_error(ErrorSource error_source) {
   const auto error_num = errno;
 
   switch (error_num) {
+    case EISCONN:
+      return EC::AlreadyConnected;
     case ENETDOWN:
       return EC::NetworkSubsystemFailed;
     case EACCES:
@@ -257,6 +268,10 @@ static sock::SystemError last_error_to_system_error(ErrorSource error_source) {
       return EC::TimedOut;
     case EWOULDBLOCK:
       return EC::WouldBlock;
+    case EALREADY:
+      return EC::AlreadyInProgress;
+    case EINPROGRESS:
+      return EC::NowInProgress;
     case EHOSTUNREACH:
       return EC::HostUnreachable;
     case EBADF:
@@ -332,9 +347,29 @@ static sock::Status set_socket_option_timeout_ms(sock::detail::RawSocket socket,
 #endif
 }
 
+static sock::Status set_socket_non_blocking(sock::detail::RawSocket socket, bool non_blocking) {
+#if defined(SOCKLIB_WINDOWS)
+  u_long non_blocking_value = static_cast<u_long>(non_blocking);
+  if (is_error(::ioctlsocket(socket, FIONBIO, &non_blocking_value))) {
+    return last_error_to_status(sock::Error::SetSocketBlockingFailed,
+                                ErrorSource::FcntlOrIoctlsocket);
+  }
+  return {};
+#else
+  if (is_error(
+        ::fcntl(socket, F_SETFL,
+                (non_blocking ? O_NONBLOCK : 0) | (::fcntl(socket, F_GETFL) & ~O_NONBLOCK)))) {
+    return last_error_to_status(sock::Error::SetSocketBlockingFailed,
+                                ErrorSource::FcntlOrIoctlsocket);
+  }
+  return {};
+#endif
+}
+
 static sock::Status setup_socket(sock::detail::RawSocket socket,
                                  bool client_only,
-                                 bool reuse_address) {
+                                 bool reuse_address,
+                                 bool non_blocking) {
   sock::Status status{};
 
   if (reuse_address) {
@@ -356,6 +391,13 @@ static sock::Status setup_socket(sock::detail::RawSocket socket,
   if (!client_only) {
     // Can fail.
     (void)set_socket_option<int>(socket, IPPROTO_IPV6, IPV6_V6ONLY, 0);
+  }
+
+  if (non_blocking) {
+    status = set_socket_non_blocking(socket, true);
+    if (!status) {
+      return wrap_status(status, sock::Error::SocketSetupFailed);
+    }
   }
 
   return {};
@@ -475,20 +517,7 @@ bool sock::Socket::valid() const {
 }
 
 sock::Status sock::Socket::set_non_blocking(bool non_blocking) {
-#if defined(SOCKLIB_WINDOWS)
-  u_long non_blocking_value = static_cast<u_long>(non_blocking);
-  if (is_error(::ioctlsocket(raw_socket_, FIONBIO, &non_blocking_value))) {
-    return last_error_to_status(Error::SetSocketBlockingFailed, ErrorSource::FcntlOrIoctlsocket);
-  }
-  return {};
-#else
-  if (is_error(
-        ::fcntl(raw_socket_, F_SETFL,
-                (non_blocking ? O_NONBLOCK : 0) | (::fcntl(raw_socket_, F_GETFL) & ~O_NONBLOCK)))) {
-    return last_error_to_status(Error::SetSocketBlockingFailed, ErrorSource::FcntlOrIoctlsocket);
-  }
-  return {};
-#endif
+  return set_socket_non_blocking(raw_socket_, non_blocking);
 }
 
 sock::Status sock::Socket::local_address(SocketAddress& address) const {
@@ -545,7 +574,8 @@ sock::Result<sock::DatagramSocket> sock::DatagramSocket::bind(
     };
   }
 
-  const auto setup_status = setup_socket(datagram_socket, false, bind_parameters.reuse_address);
+  const auto setup_status = setup_socket(datagram_socket, false, bind_parameters.reuse_address,
+                                         bind_parameters.non_blocking);
   if (!setup_status) {
     close_socket_if_valid(datagram_socket);
     return {
@@ -592,7 +622,8 @@ sock::Result<sock::DatagramSocket> sock::DatagramSocket::create(
     };
   }
 
-  const auto setup_status = setup_socket(datagram_socket, false, false);
+  const auto setup_status =
+    setup_socket(datagram_socket, false, false, create_parameters.non_blocking);
   if (!setup_status) {
     close_socket_if_valid(datagram_socket);
     return {
@@ -721,7 +752,7 @@ sock::Result<sock::StreamSocket> sock::StreamSocket::connect(
     };
   }
 
-  const auto setup_status = setup_socket(connection_socket, true, false);
+  const auto setup_status = setup_socket(connection_socket, true, false, false);
   if (!setup_status) {
     close_socket_if_valid(connection_socket);
     return {
@@ -757,6 +788,94 @@ sock::Result<sock::StreamSocket> sock::StreamSocket::connect(
     ip_version, hostname, port, [&](const SocketAddress& resolved_address) {
       return connect(resolved_address, connect_parameters);
     });
+}
+
+#ifdef SOCKLIB_WINDOWS
+template <typename Address>
+static sock::Result<std::pair<sock::StreamSocket, sock::StreamSocket>> windows_socket_pair_emulated(
+  bool non_blocking) {
+  auto [listener_status, listener] =
+    sock::Listener::bind(Address{Address::Ip::loopback(), 0}, {
+                                                                .non_blocking = true,
+                                                                .max_pending_connections = 1,
+                                                              });
+  if (!listener_status) {
+    return {.status = listener_status};
+  }
+
+  auto [local_address_status, local_address] = listener.local_address<Address>();
+  if (!local_address_status) {
+    return {.status = local_address_status};
+  }
+
+  auto [connect_status, connection] = sock::ConnectingSocket::initiate_connection(
+    Address{Address::Ip::loopback(), local_address.port()});
+  if (!connect_status) {
+    return {.status = connect_status};
+  }
+
+  auto [accept_status, accepted] = listener.accept();
+  if (!accept_status) {
+    return {.status = accept_status};
+  }
+
+  sock::StreamSocket socket_1 = std::move(accepted);
+  sock::StreamSocket socket_2 = std::move(connection.connected);
+  if (!socket_2) {
+    auto [connect_2_status, connection_2] = connection.connecting.connect();
+    if (!connect_2_status) {
+      return {.status = connect_2_status};
+    }
+    socket_2 = std::move(connection_2);
+  }
+
+  if (auto status = socket_1.set_non_blocking(non_blocking); !status) {
+    return {.status = status};
+  }
+  if (auto status = socket_2.set_non_blocking(non_blocking); !status) {
+    return {.status = status};
+  }
+
+  return {.status = {}, .value = {std::move(socket_1), std::move(socket_2)}};
+}
+#endif
+
+sock::Result<std::pair<sock::StreamSocket, sock::StreamSocket>> sock::StreamSocket::connected_pair(
+  const ConnectedPairParameters& pair_parameters) {
+#ifdef SOCKLIB_WINDOWS
+  sock::Status last_status = {};
+
+  for (int i = 0; i < 4; ++i) {
+    {
+      auto [status, pair] =
+        windows_socket_pair_emulated<sock::SocketIpV6Address>(pair_parameters.non_blocking);
+      if (status) {
+        return {.status = status, .value = std::move(pair)};
+      } else {
+        last_status = status;
+      }
+    }
+    {
+      auto [status, pair] =
+        windows_socket_pair_emulated<sock::SocketIpV4Address>(pair_parameters.non_blocking);
+      if (status) {
+        return {.status = status, .value = std::move(pair)};
+      } else {
+        last_status = status;
+      }
+    }
+  }
+
+  return {.status = last_status};
+#else
+  detail::RawSocket sockets[2]{};
+  if (is_error(::socketpair(AF_UNIX, SOCK_STREAM, 0, sockets))) {
+    return {
+      .status = last_error_to_status(Error::SocketPairFailed, ErrorSource::SocketPair),
+    };
+  }
+  return {.status = {}, .value = {StreamSocket{sockets[0]}, StreamSocket{sockets[1]}}};
+#endif
 }
 
 sock::Result<size_t> sock::StreamSocket::send(const void* data, size_t data_size) {
@@ -842,6 +961,123 @@ sock::Result<size_t> sock::StreamSocket::receive(void* data, size_t data_size) {
   };
 }
 
+sock::ConnectingSocket::ConnectingSocket(detail::RawSocket raw_socket,
+                                         std::unique_ptr<uint64_t[]> socket_address,
+                                         size_t sockt_address_size)
+    : Socket(raw_socket),
+      socket_address(std::move(socket_address)),
+      sockt_address_size(sockt_address_size) {}
+
+sock::ConnectingSocket::ConnectingSocket(ConnectingSocket&& other) noexcept {
+  raw_socket_ = other.raw_socket_;
+  socket_address = std::move(other.socket_address);
+  sockt_address_size = other.sockt_address_size;
+
+  other.raw_socket_ = detail::invalid_raw_socket;
+  other.socket_address = {};
+  other.sockt_address_size = 0;
+}
+
+sock::Result<sock::ConnectingSocket::SocketPair> sock::ConnectingSocket::initiate_connection(
+  const SocketAddress& address,
+  const ConnectParameters& connect_parameters) {
+  const auto connection_socket = ::socket(address_type_to_protocol(address.type()), SOCK_STREAM, 0);
+  if (!is_valid_socket(connection_socket)) {
+    return {
+      .status = last_error_to_status(Error::SocketCreationFailed, ErrorSource::Socket),
+    };
+  }
+
+  const auto setup_status = setup_socket(connection_socket, true, false, true);
+  if (!setup_status) {
+    close_socket_if_valid(connection_socket);
+    return {
+      .status = setup_status,
+    };
+  }
+
+  std::unique_ptr<uint64_t[]> socket_address_buffer;
+  size_t socket_address_size{};
+
+  socket_address_convert_to_raw(address, [&](const sockaddr* sockaddr, socklen_t sockaddr_size) {
+    socket_address_buffer =
+      std::make_unique<uint64_t[]>((sockaddr_size + sizeof(uint64_t) - 1) / sizeof(uint64_t));
+    std::memcpy(socket_address_buffer.get(), sockaddr, sockaddr_size);
+    socket_address_size = size_t(sockaddr_size);
+  });
+
+  const int connect_status = handle_eintr([&] {
+    return ::connect(connection_socket, reinterpret_cast<sockaddr*>(socket_address_buffer.get()),
+                     socket_address_size);
+  });
+
+  if (is_error(connect_status)) {
+    const auto status = last_error_to_status(Error::ConnectFailed, ErrorSource::Connect);
+    if (!status.would_block() && !status.has_error(SystemError::AlreadyInProgress) &&
+        !status.has_error(SystemError::NowInProgress)) {
+      close_socket_if_valid(connect_status);
+      return {
+        .status = status,
+      };
+    }
+
+    return {
+      .status = {},
+      .value = {ConnectingSocket{connection_socket, std::move(socket_address_buffer),
+                                 socket_address_size},
+                StreamSocket{}},
+    };
+  } else {
+    return {
+      .status = {},
+      .value = {ConnectingSocket{}, StreamSocket{connection_socket}},
+    };
+  }
+}
+
+sock::Result<sock::StreamSocket> sock::ConnectingSocket::connect() {
+  if (raw_socket_ == detail::invalid_raw_socket) {
+    return {
+      .status = Status{Error::ConnectFailed, Error::None, SystemError::None},
+    };
+  }
+
+  const int connect_status = handle_eintr([&] {
+    return ::connect(raw_socket_, reinterpret_cast<sockaddr*>(socket_address.get()),
+                     sockt_address_size);
+  });
+
+  if (is_error(connect_status)) {
+    auto status = last_error_to_status(Error::ConnectFailed, ErrorSource::Connect);
+    if (status.system_error != SystemError::AlreadyConnected) {
+      auto is_expected_error = status.would_block() ||
+                               status.has_error(SystemError::AlreadyInProgress) ||
+                               status.has_error(SystemError::NowInProgress);
+#ifdef SOCKLIB_WINDOWS
+      // In order to preserve backward compatibility, this error is reported as WSAEINVAL to
+      // Windows Sockets 1.1.
+      is_expected_error |= status.system_error == SystemError::InvalidValue;
+#endif
+
+      if (is_expected_error) {
+        status.system_error = SystemError::WouldBlock;
+      }
+
+      return {
+        .status = status,
+      };
+    }
+  }
+
+  const auto socket = raw_socket_;
+
+  raw_socket_ = detail::invalid_raw_socket;
+  socket_address = {};
+  sockt_address_size = 0;
+
+  return {.status = {}, .value = StreamSocket{socket}};
+}
+
 sock::Result<sock::Listener> sock::Listener::bind(const SocketAddress& address,
                                                   const BindParameters& bind_parameters) {
   const auto listener_socket = ::socket(address_type_to_protocol(address.type()), SOCK_STREAM, 0);
@@ -851,7 +1087,8 @@ sock::Result<sock::Listener> sock::Listener::bind(const SocketAddress& address,
     };
   }
 
-  const auto setup_status = setup_socket(listener_socket, false, bind_parameters.reuse_address);
+  const auto setup_status = setup_socket(listener_socket, false, bind_parameters.reuse_address,
+                                         bind_parameters.non_blocking);
   if (!setup_status) {
     close_socket_if_valid(listener_socket);
     return {
@@ -930,6 +1167,135 @@ sock::Result<sock::StreamSocket> sock::Listener::accept(SocketAddress* peer_addr
   };
 }
 
+#ifdef SOCKLIB_WINDOWS
+
+class PollCanceller {
+  sock::StreamSocket write_socket;
+  sock::StreamSocket read_socket;
+  bool initialized{false};
+
+ public:
+  PollCanceller() {
+    auto [status, pair] = sock::StreamSocket::connected_pair({
+      .non_blocking = true,
+    });
+    if (status) {
+      write_socket = std::move(pair.first);
+      read_socket = std::move(pair.second);
+      initialized = true;
+    }
+  }
+
+  bool valid() const { return initialized; }
+
+  sock::detail::RawSocket cancel_socket() const {
+    return sock::detail::RawSocketAccessor::get(read_socket);
+  }
+
+  bool drain() {
+    uint8_t buffer[32];
+
+    bool first = true;
+
+    while (true) {
+      const auto [receive_status, received_bytes] = read_socket.receive(buffer);
+      if (first) {
+        if (!receive_status) {
+          return false;
+        }
+        first = false;
+      }
+
+      if (receive_status.would_block() || received_bytes < sizeof(buffer)) {
+        return true;
+      }
+
+      if (!receive_status) {
+        return false;
+      }
+    }
+  }
+
+  bool signal() {
+    uint8_t buffer[1]{};
+    const auto [send_status, sent_bytes] = write_socket.send(buffer);
+    return send_status && sent_bytes == 1;
+  }
+};
+
+#else
+
+class PollCanceller {
+  int read_pipe{-1};
+  int write_pipe{-1};
+  bool initialized{false};
+
+ public:
+  PollCanceller() {
+    int pipe_fds[2]{};
+    if (::pipe(pipe_fds) == 0) {
+      read_pipe = pipe_fds[0];
+      write_pipe = pipe_fds[1];
+
+      if (::fcntl(read_pipe, F_SETFL, O_NONBLOCK | (::fcntl(read_pipe, F_GETFL))) == -1) {
+        return;
+      }
+
+      if (::fcntl(write_pipe, F_SETFL, O_NONBLOCK | (::fcntl(write_pipe, F_GETFL))) == -1) {
+        return;
+      }
+
+      initialized = true;
+    }
+  }
+
+  ~PollCanceller() {
+    if (read_pipe != -1) {
+      ::close(read_pipe);
+    }
+    if (write_pipe != -1) {
+      ::close(write_pipe);
+    }
+  }
+
+  bool valid() const { return initialized; }
+
+  sock::detail::RawSocket cancel_socket() const { return read_pipe; }
+
+  bool drain() {
+    uint8_t buffer[32];
+
+    bool first = true;
+
+    while (true) {
+      const auto result = handle_eintr([&] { return ::read(read_pipe, buffer, sizeof(buffer)); });
+      if (first) {
+        if (result <= 0) {
+          return false;
+        }
+        first = false;
+      }
+
+      if ((result == -1 && errno == EWOULDBLOCK) || result < sizeof(buffer)) {
+        return true;
+      }
+
+      if (result <= 0) {
+        return false;
+      }
+    }
+  }
+
+  bool signal() {
+    uint8_t buffer[1]{};
+    const auto result =
+      handle_eintr([this, buffer] { return ::write(write_pipe, buffer, sizeof(buffer)); });
+    return result == 1;
+  }
+};
+
+#endif
+
 class PollerImpl : public sock::Poller {
 #if defined(SOCKLIB_WINDOWS)
   using RawEntry = WSAPOLLFD;
@@ -939,12 +1305,13 @@ class PollerImpl : public sock::Poller {
 
   std::vector<RawEntry> raw_entries;
 
- public:
-  sock::Result<size_t> poll(std::span<PollEntry> entries, int timeout_ms) override {
-    if (entries.empty()) {
-      return {};
-    }
+  PollCanceller canceller;
+  std::atomic_bool cancel_pending{false};
 
+ public:
+  operator bool() const { return canceller.valid(); }
+
+  sock::Result<size_t> poll(std::span<PollEntry> entries, int timeout_ms) override {
     raw_entries.resize(entries.size());
 
     for (size_t i = 0; i < entries.size(); i++) {
@@ -965,50 +1332,101 @@ class PollerImpl : public sock::Poller {
       }
     }
 
+    if (cancel_pending) {
+      if (canceller.drain()) {
+        cancel_pending = false;
+        return {
+          .status = {},
+          .value = {},
+        };
+      }
+    }
+
+    raw_entries.push_back({
+      .fd = canceller.cancel_socket(),
+      .events = POLLIN,
+    });
+
 #if defined(SOCKLIB_WINDOWS)
-    const auto result = handle_eintr(
+    const auto poll_result = handle_eintr(
       [&] { return ::WSAPoll(raw_entries.data(), ULONG(raw_entries.size()), timeout_ms); });
 #else
-    const auto result =
+    const auto poll_result =
       handle_eintr([&] { return ::poll(raw_entries.data(), int(raw_entries.size()), timeout_ms); });
 #endif
 
-    if (is_error(result)) {
+    if (is_error(poll_result)) {
       return {
         .status = last_error_to_status(sock::Error::PollFailed, ErrorSource::Poll),
       };
     }
 
-    for (size_t i = 0; i < entries.size(); i++) {
-      const auto& source = raw_entries[i];
-      if (!source.revents) {
-        continue;
+    auto signaled_entries = size_t(poll_result);
+
+    if (const auto& last = raw_entries[entries.size()]; last.revents) {
+      const bool signaled_input = last.revents & POLLIN;
+      bool cancellation_error = last.revents & (POLLERR | POLLHUP | POLLNVAL);
+
+      if (signaled_input) {
+        if (canceller.drain()) {
+          cancel_pending.store(false);
+        } else {
+          cancellation_error = true;
+        }
       }
 
-      auto& dest = entries[i];
+      if (cancellation_error) {
+        return {
+          .status = sock::Status{sock::Error::PollFailed, sock::Error::CancellationFailed},
+        };
+      }
 
-      const auto set_event = [&](int raw_flag, StatusEvents flag) {
-        if (source.revents & raw_flag) {
-          dest.status_events = dest.status_events | flag;
+      signaled_entries -= 1;
+    }
+
+    if (signaled_entries > 0) {
+      for (size_t i = 0; i < entries.size(); i++) {
+        const auto& source = raw_entries[i];
+        if (!source.revents) {
+          continue;
         }
-      };
 
-      set_event(POLLERR, StatusEvents::Error);
-      set_event(POLLHUP, StatusEvents::Disconnected);
-      set_event(POLLNVAL, StatusEvents::InvalidSocket);
-      set_event(POLLIN, StatusEvents::CanReceiveFrom);
-      set_event(POLLOUT, StatusEvents::CanSendTo);
+        auto& dest = entries[i];
+
+        const auto set_event = [&](int raw_flag, StatusEvents flag) {
+          if (source.revents & raw_flag) {
+            dest.status_events = dest.status_events | flag;
+          }
+        };
+
+        set_event(POLLERR, StatusEvents::Error);
+        set_event(POLLHUP, StatusEvents::Disconnected);
+        set_event(POLLNVAL, StatusEvents::InvalidSocket);
+        set_event(POLLIN, StatusEvents::CanReceiveFrom);
+        set_event(POLLOUT, StatusEvents::CanSendTo);
+      }
     }
 
     return {
       .status = {},
-      .value = size_t(result),
+      .value = signaled_entries,
     };
+  }
+
+  bool cancel() override {
+    if (!cancel_pending.exchange(true)) {
+      return canceller.signal();
+    }
+    return true;
   }
 };
 
 std::unique_ptr<sock::Poller> sock::Poller::create() {
-  return std::make_unique<PollerImpl>();
+  auto impl = std::make_unique<PollerImpl>();
+  if (!*impl) {
+    return nullptr;
+  }
+  return impl;
 }
 bool sock::Poller::PollEntry::has_events(StatusEvents events) const {
   return (status_events & events) == events;

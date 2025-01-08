@@ -5,6 +5,7 @@
 #include <memory>
 #include <span>
 #include <string_view>
+#include <utility>
 
 #include "Address.hpp"
 #include "Status.hpp"
@@ -42,6 +43,23 @@ struct RawSocketAccessor;
 struct IpResolver {
   static Result<IpV4Address> resolve_ipv4(std::string_view hostname);
   static Result<IpV6Address> resolve_ipv6(std::string_view hostname);
+
+  template <typename Ip>
+  struct ForIp {};
+};
+
+template <>
+struct IpResolver::ForIp<IpV4Address> {
+  static Result<IpV4Address> resolve(std::string_view hostname) {
+    return IpResolver::resolve_ipv4(hostname);
+  }
+};
+
+template <>
+struct IpResolver::ForIp<IpV6Address> {
+  static Result<IpV6Address> resolve(std::string_view hostname) {
+    return IpResolver::resolve_ipv6(hostname);
+  }
 };
 
 class Socket {
@@ -75,14 +93,14 @@ class Socket {
   Result<T> local_address() const {
     T address{};
     const auto status = local_address(address);
-    return {.status = status, .address = address};
+    return {.status = status, .value = address};
   }
 
   template <typename T>
   Result<T> peer_address() const {
     T address{};
     const auto status = peer_address(address);
-    return {.status = status, .address = address};
+    return {.status = status, .value = address};
   }
 };
 
@@ -105,6 +123,7 @@ class DatagramSocket : public detail::RwSocket {
 
  public:
   struct BindParameters {
+    bool non_blocking = false;
     bool reuse_address = false;
 
     constexpr static BindParameters default_parameters() { return BindParameters{}; }
@@ -119,6 +138,8 @@ class DatagramSocket : public detail::RwSocket {
     const BindParameters& bind_parameters = BindParameters::default_parameters());
 
   struct CreateParameters {
+    bool non_blocking = false;
+
     constexpr static CreateParameters default_parameters() { return CreateParameters{}; }
   };
   static Result<DatagramSocket> create(
@@ -142,6 +163,7 @@ class DatagramSocket : public detail::RwSocket {
 
 class StreamSocket : public detail::RwSocket {
   friend class Listener;
+  friend class ConnectingSocket;
 
   using RwSocket::RwSocket;
 
@@ -158,6 +180,15 @@ class StreamSocket : public detail::RwSocket {
     uint16_t port,
     const ConnectParameters& connect_parameters = ConnectParameters::default_parameters());
 
+  struct ConnectedPairParameters {
+    bool non_blocking = false;
+    constexpr static ConnectedPairParameters default_parameters() {
+      return ConnectedPairParameters{};
+    }
+  };
+  static Result<std::pair<StreamSocket, StreamSocket>> connected_pair(
+    const ConnectedPairParameters& pair_parameters = ConnectedPairParameters::default_parameters());
+
   Result<size_t> send(const void* data, size_t data_size);
   Result<size_t> send_all(const void* data, size_t data_size);
   Result<size_t> receive(void* data, size_t data_size);
@@ -169,11 +200,52 @@ class StreamSocket : public detail::RwSocket {
   Result<size_t> receive(std::span<uint8_t> data) { return receive(data.data(), data.size()); }
 };
 
+namespace detail {
+
+template <typename TConnectingSocket>
+struct ConnectionSocketPair {
+  TConnectingSocket connecting;
+  StreamSocket connected;
+};
+
+}  // namespace detail
+
+class ConnectingSocket : public Socket {
+  std::unique_ptr<uint64_t[]> socket_address{};
+  size_t sockt_address_size{};
+
+  ConnectingSocket(detail::RawSocket raw_socket,
+                   std::unique_ptr<uint64_t[]> socket_address,
+                   size_t sockt_address_size);
+
+ public:
+  using SocketPair = detail::ConnectionSocketPair<ConnectingSocket>;
+
+  ConnectingSocket() = default;
+
+  ConnectingSocket(const ConnectingSocket& other) = delete;
+  ConnectingSocket& operator=(const ConnectingSocket& other) = delete;
+
+  ConnectingSocket(ConnectingSocket&& other) noexcept;
+  ConnectingSocket& operator=(ConnectingSocket&& other) = delete;
+
+  struct ConnectParameters {
+    constexpr static ConnectParameters default_parameters() { return ConnectParameters{}; }
+  };
+
+  static Result<SocketPair> initiate_connection(
+    const SocketAddress& address,
+    const ConnectParameters& connect_parameters = ConnectParameters::default_parameters());
+
+  Result<StreamSocket> connect();
+};
+
 class Listener : public Socket {
   using Socket::Socket;
 
  public:
   struct BindParameters {
+    bool non_blocking = false;
     bool reuse_address = false;
     int max_pending_connections = 16;
 
@@ -194,6 +266,14 @@ class Listener : public Socket {
 class Poller {
  public:
   static std::unique_ptr<Poller> create();
+
+  Poller() = default;
+
+  Poller(Poller&& other) = delete;
+  Poller& operator=(Poller&& other) = delete;
+
+  Poller(const Poller& other) = delete;
+  Poller& operator=(const Poller& other) = delete;
 
   virtual ~Poller() = default;
 
@@ -224,6 +304,7 @@ class Poller {
   };
 
   virtual Result<size_t> poll(std::span<PollEntry> entries, int timeout_ms) = 0;
+  virtual bool cancel() = 0;
 };
 
 SOCKLIB_IMPLEMENT_ENUM_BIT_OPERATIONS(Poller::QueryEvents)

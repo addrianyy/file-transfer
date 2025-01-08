@@ -5,11 +5,10 @@
 
 #include <tools/Ip.hpp>
 
-#include <helpers/IpAddressFormatter.hpp>
 #include <net/Port.hpp>
 
 #include <base/Log.hpp>
-#include <base/text/Parsing.hpp>
+#include <base/text/Helpers.hpp>
 
 #include <filesystem>
 #include <thread>
@@ -23,7 +22,7 @@ bool tools::reciever::run(std::span<const std::string_view> args) {
   uint16_t port = net::default_port;
 
   if (args.size() == 2) {
-    if (!base::parse_integer(args[1], port)) {
+    if (!base::text::to_number(args[1], port)) {
       log_error("invalid port `{}`", args[1]);
       return false;
     }
@@ -62,7 +61,7 @@ bool tools::reciever::run(std::span<const std::string_view> args) {
       continue;
     }
 
-    const auto peer_ip = IpAddressFormatter::format(peer_address.ip());
+    const auto peer_ip = peer_address.ip().stringify();
 
     log_info("client {} connected", peer_ip);
 

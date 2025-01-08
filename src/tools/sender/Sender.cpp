@@ -9,7 +9,7 @@
 #include <net/Port.hpp>
 
 #include <base/Log.hpp>
-#include <base/text/Parsing.hpp>
+#include <base/text/Helpers.hpp>
 
 bool tools::sender::run(std::span<const std::string_view> args) {
   if (args.size() < 2) {
@@ -25,7 +25,7 @@ bool tools::sender::run(std::span<const std::string_view> args) {
     const auto port_string = address.substr(colon + 1);
     address = address.substr(0, colon);
 
-    if (!base::parse_integer(port_string, port)) {
+    if (!base::text::to_number(port_string, port)) {
       log_error("invalid port `{}`", port_string);
       return false;
     }
