@@ -54,7 +54,7 @@ class IpV6Address {
     return c[0] == 0 && c[1] == 0 && c[2] == 0 && c[3] == 0 && c[4] == 0 && c[5] == 0xffff;
   }
 
-  constexpr std::optional<IpV4Address> extract_mapped_ipv4() const {
+  constexpr std::optional<IpV4Address> mapped_ipv4() const {
     if (!is_mapped_to_ipv4()) {
       return std::nullopt;
     }
@@ -69,6 +69,7 @@ class IpV6Address {
   constexpr std::array<uint16_t, 8> components() const { return components_; }
 
   std::string stringify() const;
+  std::string stringify_v6() const;
 };
 
 class SocketAddress {
@@ -141,6 +142,7 @@ class SocketIpV6Address : public SocketAddress {
   constexpr uint16_t port() const { return port_; }
 
   std::string stringify() const;
+  std::string stringify_v6() const;
 };
 
 }  // namespace sock
