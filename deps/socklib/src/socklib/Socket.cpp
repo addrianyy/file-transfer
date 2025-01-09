@@ -367,7 +367,6 @@ static sock::Status set_socket_non_blocking(sock::detail::RawSocket socket, bool
 }
 
 static sock::Status setup_socket(sock::detail::RawSocket socket,
-                                 bool client_only,
                                  bool reuse_address,
                                  bool non_blocking) {
   sock::Status status{};
@@ -388,10 +387,8 @@ static sock::Status setup_socket(sock::detail::RawSocket socket,
   }
 #endif
 
-  if (!client_only) {
-    // Can fail.
-    (void)set_socket_option<int>(socket, IPPROTO_IPV6, IPV6_V6ONLY, 0);
-  }
+  // Can fail.
+  (void)set_socket_option<int>(socket, IPPROTO_IPV6, IPV6_V6ONLY, 0);
 
   if (non_blocking) {
     status = set_socket_non_blocking(socket, true);
@@ -574,8 +571,8 @@ sock::Result<sock::DatagramSocket> sock::DatagramSocket::bind(
     };
   }
 
-  const auto setup_status = setup_socket(datagram_socket, false, bind_parameters.reuse_address,
-                                         bind_parameters.non_blocking);
+  const auto setup_status =
+    setup_socket(datagram_socket, bind_parameters.reuse_address, bind_parameters.non_blocking);
   if (!setup_status) {
     close_socket_if_valid(datagram_socket);
     return {
@@ -622,8 +619,7 @@ sock::Result<sock::DatagramSocket> sock::DatagramSocket::create(
     };
   }
 
-  const auto setup_status =
-    setup_socket(datagram_socket, false, false, create_parameters.non_blocking);
+  const auto setup_status = setup_socket(datagram_socket, false, create_parameters.non_blocking);
   if (!setup_status) {
     close_socket_if_valid(datagram_socket);
     return {
@@ -752,7 +748,7 @@ sock::Result<sock::StreamSocket> sock::StreamSocket::connect(
     };
   }
 
-  const auto setup_status = setup_socket(connection_socket, true, false, false);
+  const auto setup_status = setup_socket(connection_socket, false, false);
   if (!setup_status) {
     close_socket_if_valid(connection_socket);
     return {
@@ -988,7 +984,7 @@ sock::Result<sock::ConnectingSocket::SocketPair> sock::ConnectingSocket::initiat
     };
   }
 
-  const auto setup_status = setup_socket(connection_socket, true, false, true);
+  const auto setup_status = setup_socket(connection_socket, false, true);
   if (!setup_status) {
     close_socket_if_valid(connection_socket);
     return {
@@ -1087,8 +1083,8 @@ sock::Result<sock::Listener> sock::Listener::bind(const SocketAddress& address,
     };
   }
 
-  const auto setup_status = setup_socket(listener_socket, false, bind_parameters.reuse_address,
-                                         bind_parameters.non_blocking);
+  const auto setup_status =
+    setup_socket(listener_socket, bind_parameters.reuse_address, bind_parameters.non_blocking);
   if (!setup_status) {
     close_socket_if_valid(listener_socket);
     return {
