@@ -368,19 +368,27 @@ static sock::Status set_socket_non_blocking(sock::detail::RawSocket socket, bool
 
 static sock::Status setup_socket(sock::detail::RawSocket socket,
                                  bool reuse_address,
+                                 bool reuse_port,
                                  bool non_blocking) {
   sock::Status status{};
 
+#if !defined(SOCKLIB_WINDOWS)
   if (reuse_address) {
-    status = set_socket_option<int>(socket, SOL_SOCKET, SO_REUSEADDR, reuse_address);
+    status = set_socket_option<int>(socket, SOL_SOCKET, SO_REUSEADDR, 1);
     if (!status) {
       return wrap_status(status, sock::Error::SocketSetupFailed);
     }
   }
 
-#if !defined(SOCKLIB_WINDOWS)
-  if (reuse_address) {
-    status = set_socket_option<int>(socket, SOL_SOCKET, SO_REUSEPORT, reuse_address);
+  if (reuse_port) {
+    status = set_socket_option<int>(socket, SOL_SOCKET, SO_REUSEPORT, 1);
+    if (!status) {
+      return wrap_status(status, sock::Error::SocketSetupFailed);
+    }
+  }
+#else
+  if (reuse_port) {
+    status = set_socket_option<int>(socket, SOL_SOCKET, SO_REUSEADDR, 1);
     if (!status) {
       return wrap_status(status, sock::Error::SocketSetupFailed);
     }
@@ -571,8 +579,8 @@ sock::Result<sock::DatagramSocket> sock::DatagramSocket::bind(
     };
   }
 
-  const auto setup_status =
-    setup_socket(datagram_socket, bind_parameters.reuse_address, bind_parameters.non_blocking);
+  const auto setup_status = setup_socket(datagram_socket, bind_parameters.reuse_address,
+                                         bind_parameters.reuse_port, bind_parameters.non_blocking);
   if (!setup_status) {
     close_socket_if_valid(datagram_socket);
     return {
@@ -619,7 +627,8 @@ sock::Result<sock::DatagramSocket> sock::DatagramSocket::create(
     };
   }
 
-  const auto setup_status = setup_socket(datagram_socket, false, create_parameters.non_blocking);
+  const auto setup_status =
+    setup_socket(datagram_socket, false, false, create_parameters.non_blocking);
   if (!setup_status) {
     close_socket_if_valid(datagram_socket);
     return {
@@ -748,7 +757,7 @@ sock::Result<sock::StreamSocket> sock::StreamSocket::connect(
     };
   }
 
-  const auto setup_status = setup_socket(connection_socket, false, false);
+  const auto setup_status = setup_socket(connection_socket, false, false, false);
   if (!setup_status) {
     close_socket_if_valid(connection_socket);
     return {
@@ -984,7 +993,7 @@ sock::Result<sock::ConnectingSocket::SocketPair> sock::ConnectingSocket::initiat
     };
   }
 
-  const auto setup_status = setup_socket(connection_socket, false, true);
+  const auto setup_status = setup_socket(connection_socket, false, false, true);
   if (!setup_status) {
     close_socket_if_valid(connection_socket);
     return {
@@ -1083,8 +1092,8 @@ sock::Result<sock::Listener> sock::Listener::bind(const SocketAddress& address,
     };
   }
 
-  const auto setup_status =
-    setup_socket(listener_socket, bind_parameters.reuse_address, bind_parameters.non_blocking);
+  const auto setup_status = setup_socket(listener_socket, bind_parameters.reuse_address,
+                                         bind_parameters.reuse_port, bind_parameters.non_blocking);
   if (!setup_status) {
     close_socket_if_valid(listener_socket);
     return {

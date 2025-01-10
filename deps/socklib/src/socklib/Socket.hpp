@@ -125,6 +125,7 @@ class DatagramSocket : public detail::RwSocket {
   struct BindParameters {
     bool non_blocking = false;
     bool reuse_address = false;
+    bool reuse_port = false;
 
     constexpr static BindParameters default_parameters() { return BindParameters{}; }
   };
@@ -247,6 +248,7 @@ class Listener : public Socket {
   struct BindParameters {
     bool non_blocking = false;
     bool reuse_address = false;
+    bool reuse_port = false;
     int max_pending_connections = 16;
 
     constexpr static BindParameters default_parameters() { return BindParameters{}; }

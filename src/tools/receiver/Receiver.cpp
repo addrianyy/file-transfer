@@ -28,8 +28,10 @@ bool tools::reciever::run(std::span<const std::string_view> args) {
     }
   }
 
-  auto [bind_status, listener] =
-    sock::Listener::bind(tools::SocketIpAddress(tools::IpAddress::unspecified(), port));
+  auto [bind_status, listener] = sock::Listener::bind(
+    tools::SocketIpAddress(tools::IpAddress::unspecified(), port), {
+                                                                     .reuse_address = true,
+                                                                   });
   if (!bind_status) {
     log_error("failed to bind receiver to port {}: {}", port, bind_status.stringify());
     return false;
