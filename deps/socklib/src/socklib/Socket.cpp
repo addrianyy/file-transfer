@@ -1029,6 +1029,22 @@ sock::ConnectingSocket::ConnectingSocket(ConnectingSocket&& other) noexcept {
   other.socket_address_size = 0;
 }
 
+sock::ConnectingSocket& sock::ConnectingSocket::operator=(sock::ConnectingSocket&& other) noexcept {
+  if (this != &other) {
+    close_socket_if_valid(raw_socket_);
+
+    raw_socket_ = other.raw_socket_;
+    socket_address = std::move(other.socket_address);
+    socket_address_size = other.socket_address_size;
+
+    other.raw_socket_ = detail::invalid_raw_socket;
+    other.socket_address = {};
+    other.socket_address_size = 0;
+  }
+
+  return *this;
+}
+
 sock::Result<sock::ConnectingSocket::SocketPair> sock::ConnectingSocket::initiate_connection(
   const SocketAddress& address,
   const ConnectParameters& connect_parameters) {

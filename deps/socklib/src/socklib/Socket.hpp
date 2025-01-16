@@ -242,7 +242,7 @@ class ConnectingSocket : public Socket {
   ConnectingSocket& operator=(const ConnectingSocket& other) = delete;
 
   ConnectingSocket(ConnectingSocket&& other) noexcept;
-  ConnectingSocket& operator=(ConnectingSocket&& other) = delete;
+  ConnectingSocket& operator=(ConnectingSocket&& other) noexcept;
 
   struct ConnectParameters {
     constexpr static ConnectParameters default_parameters() { return ConnectParameters{}; }
