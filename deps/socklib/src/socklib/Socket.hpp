@@ -152,14 +152,10 @@ class DatagramSocket : public detail::RwSocket {
     const CreateParameters& create_parameters = CreateParameters::default_parameters());
 
   Result<size_t> send(const SocketAddress& to, const void* data, size_t data_size);
-  Result<size_t> send_all(const SocketAddress& to, const void* data, size_t data_size);
   Result<size_t> receive(SocketAddress& from, void* data, size_t data_size);
 
   Result<size_t> send(const SocketAddress& to, std::span<const uint8_t> data) {
     return send(to, data.data(), data.size());
-  }
-  Result<size_t> send_all(const SocketAddress& to, std::span<const uint8_t> data) {
-    return send_all(to, data.data(), data.size());
   }
   Result<size_t> receive(SocketAddress& from, std::span<uint8_t> data) {
     return receive(from, data.data(), data.size());
@@ -187,6 +183,7 @@ class StreamSocket : public detail::RwSocket {
 
   struct ConnectedPairParameters {
     bool non_blocking = false;
+
     constexpr static ConnectedPairParameters default_parameters() {
       return ConnectedPairParameters{};
     }
@@ -226,11 +223,11 @@ struct ConnectionSocketPair {
 
 class ConnectingSocket : public Socket {
   std::unique_ptr<uint64_t[]> socket_address{};
-  size_t sockt_address_size{};
+  size_t socket_address_size{};
 
   ConnectingSocket(detail::RawSocket raw_socket,
                    std::unique_ptr<uint64_t[]> socket_address,
-                   size_t sockt_address_size);
+                   size_t socket_address_size);
 
  public:
   using SocketPair = detail::ConnectionSocketPair<ConnectingSocket>;
@@ -262,7 +259,7 @@ class Listener : public Socket {
     bool non_blocking = false;
     bool reuse_address = false;
     bool reuse_port = false;
-    int max_pending_connections = 16;
+    uint32_t max_pending_connections = 16;
 
     constexpr static BindParameters default_parameters() { return BindParameters{}; }
   };

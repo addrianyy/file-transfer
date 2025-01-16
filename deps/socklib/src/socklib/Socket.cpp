@@ -5,7 +5,6 @@
 #include <cstring>
 #include <limits>
 #include <string>
-#include <vector>
 
 #if defined(_WIN32)
 #define SOCKLIB_WINDOWS
@@ -40,23 +39,6 @@
 
 struct SockaddrBuffer {
   alignas(32) uint8_t data[512];
-};
-
-enum class ErrorSource {
-  Accept,
-  Socket,
-  Bind,
-  Listen,
-  Recv,
-  Send,
-  Connect,
-  FcntlOrIoctlsocket,
-  GetSockName,
-  GetPeerName,
-  Getaddrinfo,
-  Setsockopt,
-  Poll,
-  SocketPair,
 };
 
 static int address_type_to_protocol(sock::SocketAddress::Type type) {
@@ -200,7 +182,7 @@ static void close_socket_if_valid(sock::detail::RawSocket socket) {
   }
 }
 
-static sock::SystemError last_error_to_system_error(ErrorSource error_source) {
+static sock::SystemError last_error_to_system_error() {
   using EC = sock::SystemError;
 
 #if defined(SOCKLIB_WINDOWS)
@@ -293,8 +275,8 @@ static sock::SystemError last_error_to_system_error(ErrorSource error_source) {
 #endif
 }
 
-static sock::Status last_error_to_status(sock::Error error, ErrorSource error_source) {
-  return sock::Status{error, sock::Error::None, last_error_to_system_error(error_source)};
+static sock::Status last_error_to_status(sock::Error error) {
+  return sock::Status{error, sock::Error::None, last_error_to_system_error()};
 }
 
 static sock::Status wrap_status(const sock::Status& status, sock::Error error) {
@@ -308,7 +290,7 @@ static sock::Status set_socket_option(sock::detail::RawSocket socket,
                                       const T& value) {
   if (is_error(::setsockopt(socket, level, option, reinterpret_cast<const char*>(&value),
                             sizeof(value)))) {
-    return last_error_to_status(sock::Error::SetSocketOptionFailed, ErrorSource::Setsockopt);
+    return last_error_to_status(sock::Error::SetSocketOptionFailed);
   }
   return {};
 }
@@ -351,16 +333,14 @@ static sock::Status set_socket_non_blocking(sock::detail::RawSocket socket, bool
 #if defined(SOCKLIB_WINDOWS)
   u_long non_blocking_value = static_cast<u_long>(non_blocking);
   if (is_error(::ioctlsocket(socket, FIONBIO, &non_blocking_value))) {
-    return last_error_to_status(sock::Error::SetSocketBlockingFailed,
-                                ErrorSource::FcntlOrIoctlsocket);
+    return last_error_to_status(sock::Error::SetSocketBlockingFailed);
   }
   return {};
 #else
   if (is_error(
         ::fcntl(socket, F_SETFL,
                 (non_blocking ? O_NONBLOCK : 0) | (::fcntl(socket, F_GETFL) & ~O_NONBLOCK)))) {
-    return last_error_to_status(sock::Error::SetSocketBlockingFailed,
-                                ErrorSource::FcntlOrIoctlsocket);
+    return last_error_to_status(sock::Error::SetSocketBlockingFailed);
   }
   return {};
 #endif
@@ -580,7 +560,7 @@ sock::Status sock::Socket::local_address(SocketAddress& address) const {
 
   if (is_error(::getsockname(raw_socket_, reinterpret_cast<sockaddr*>(socket_address.data),
                              &socket_address_length))) {
-    return last_error_to_status(Error::GetLocalAddressFailed, ErrorSource::GetSockName);
+    return last_error_to_status(Error::GetLocalAddressFailed);
   }
 
   if (!socket_address_convert_from_raw(socket_address, address)) {
@@ -608,7 +588,7 @@ sock::Result<sock::DatagramSocket> sock::DatagramSocket::bind(
   const auto datagram_socket = ::socket(address_type_to_protocol(address.type()), SOCK_DGRAM, 0);
   if (!is_valid_socket(datagram_socket)) {
     return {
-      .status = last_error_to_status(Error::SocketCreationFailed, ErrorSource::Socket),
+      .status = last_error_to_status(Error::SocketCreationFailed),
     };
   }
 
@@ -627,7 +607,7 @@ sock::Result<sock::DatagramSocket> sock::DatagramSocket::bind(
       bind_result = ::bind(datagram_socket, socket_address, sockaddr_size);
     });
   if (is_error(bind_result)) {
-    const auto status = last_error_to_status(Error::BindFailed, ErrorSource::Bind);
+    const auto status = last_error_to_status(Error::BindFailed);
     close_socket_if_valid(datagram_socket);
     return {
       .status = status,
@@ -656,7 +636,7 @@ sock::Result<sock::DatagramSocket> sock::DatagramSocket::create(
   const auto datagram_socket = ::socket(address_type_to_protocol(type), SOCK_DGRAM, 0);
   if (!is_valid_socket(datagram_socket)) {
     return {
-      .status = last_error_to_status(Error::SocketCreationFailed, ErrorSource::Socket),
+      .status = last_error_to_status(Error::SocketCreationFailed),
     };
   }
 
@@ -703,37 +683,13 @@ sock::Result<size_t> sock::DatagramSocket::send(const SocketAddress& to,
   }
   if (is_error_ext(result)) {
     return {
-      .status = last_error_to_status(Error::SendFailed, ErrorSource::Send),
+      .status = last_error_to_status(Error::SendFailed),
     };
   }
 
   return {
     .status = {},
     .value = size_t(result),
-  };
-}
-
-sock::Result<size_t> sock::DatagramSocket::send_all(const SocketAddress& to,
-                                                    const void* data,
-                                                    size_t data_size) {
-  auto current = reinterpret_cast<const uint8_t*>(data);
-  size_t bytes_sent = 0;
-
-  while (bytes_sent < data_size) {
-    const auto [status, current_sent] = send(to, current, data_size - bytes_sent);
-    if (!status) {
-      return {
-        .status = status,
-        .value = bytes_sent,
-      };
-    }
-    current += current_sent;
-    bytes_sent += current_sent;
-  }
-
-  return {
-    .status = {},
-    .value = bytes_sent,
   };
 }
 
@@ -764,7 +720,7 @@ sock::Result<size_t> sock::DatagramSocket::receive(SocketAddress& from,
   }
   if (is_error_ext(result)) {
     return {
-      .status = last_error_to_status(Error::ReceiveFailed, ErrorSource::Recv),
+      .status = last_error_to_status(Error::ReceiveFailed),
     };
   }
 
@@ -786,7 +742,7 @@ sock::Result<sock::StreamSocket> sock::StreamSocket::connect(
   const auto connection_socket = ::socket(address_type_to_protocol(address.type()), SOCK_STREAM, 0);
   if (!is_valid_socket(connection_socket)) {
     return {
-      .status = last_error_to_status(Error::SocketCreationFailed, ErrorSource::Socket),
+      .status = last_error_to_status(Error::SocketCreationFailed),
     };
   }
 
@@ -804,7 +760,7 @@ sock::Result<sock::StreamSocket> sock::StreamSocket::connect(
       handle_eintr([&] { return ::connect(connection_socket, sockaddr, sockaddr_size); });
   });
   if (is_error(connect_status)) {
-    const auto status = last_error_to_status(Error::ConnectFailed, ErrorSource::Connect);
+    const auto status = last_error_to_status(Error::ConnectFailed);
     close_socket_if_valid(connect_status);
     return {
       .status = status,
@@ -909,7 +865,7 @@ sock::Result<std::pair<sock::StreamSocket, sock::StreamSocket>> sock::StreamSock
   detail::RawSocket sockets[2]{};
   if (is_error(::socketpair(AF_UNIX, SOCK_STREAM, 0, sockets))) {
     return {
-      .status = last_error_to_status(Error::SocketPairFailed, ErrorSource::SocketPair),
+      .status = last_error_to_status(Error::SocketPairFailed),
     };
   }
   return {.status = {}, .value = {StreamSocket{sockets[0]}, StreamSocket{sockets[1]}}};
@@ -922,7 +878,7 @@ sock::Status sock::StreamSocket::peer_address(SocketAddress& address) const {
 
   if (is_error(::getpeername(raw_socket_, reinterpret_cast<sockaddr*>(socket_address.data),
                              &socket_address_length))) {
-    return last_error_to_status(Error::GetPeerAddressFailed, ErrorSource::GetPeerName);
+    return last_error_to_status(Error::GetPeerAddressFailed);
   }
 
   if (!socket_address_convert_from_raw(socket_address, address)) {
@@ -953,7 +909,7 @@ sock::Result<size_t> sock::StreamSocket::send(const void* data, size_t data_size
   }
   if (is_error_ext(result)) {
     return {
-      .status = last_error_to_status(Error::SendFailed, ErrorSource::Send),
+      .status = last_error_to_status(Error::SendFailed),
     };
   }
 
@@ -1005,7 +961,7 @@ sock::Result<size_t> sock::StreamSocket::receive(void* data, size_t data_size) {
   }
   if (is_error_ext(result)) {
     return {
-      .status = last_error_to_status(Error::ReceiveFailed, ErrorSource::Recv),
+      .status = last_error_to_status(Error::ReceiveFailed),
     };
   }
 
@@ -1017,19 +973,19 @@ sock::Result<size_t> sock::StreamSocket::receive(void* data, size_t data_size) {
 
 sock::ConnectingSocket::ConnectingSocket(detail::RawSocket raw_socket,
                                          std::unique_ptr<uint64_t[]> socket_address,
-                                         size_t sockt_address_size)
+                                         size_t socket_address_size)
     : Socket(raw_socket),
       socket_address(std::move(socket_address)),
-      sockt_address_size(sockt_address_size) {}
+      socket_address_size(socket_address_size) {}
 
 sock::ConnectingSocket::ConnectingSocket(ConnectingSocket&& other) noexcept {
   raw_socket_ = other.raw_socket_;
   socket_address = std::move(other.socket_address);
-  sockt_address_size = other.sockt_address_size;
+  socket_address_size = other.socket_address_size;
 
   other.raw_socket_ = detail::invalid_raw_socket;
   other.socket_address = {};
-  other.sockt_address_size = 0;
+  other.socket_address_size = 0;
 }
 
 sock::Result<sock::ConnectingSocket::SocketPair> sock::ConnectingSocket::initiate_connection(
@@ -1038,7 +994,7 @@ sock::Result<sock::ConnectingSocket::SocketPair> sock::ConnectingSocket::initiat
   const auto connection_socket = ::socket(address_type_to_protocol(address.type()), SOCK_STREAM, 0);
   if (!is_valid_socket(connection_socket)) {
     return {
-      .status = last_error_to_status(Error::SocketCreationFailed, ErrorSource::Socket),
+      .status = last_error_to_status(Error::SocketCreationFailed),
     };
   }
 
@@ -1062,11 +1018,11 @@ sock::Result<sock::ConnectingSocket::SocketPair> sock::ConnectingSocket::initiat
 
   const int connect_status = handle_eintr([&] {
     return ::connect(connection_socket, reinterpret_cast<sockaddr*>(socket_address_buffer.get()),
-                     socket_address_size);
+                     int(socket_address_size));
   });
 
   if (is_error(connect_status)) {
-    const auto status = last_error_to_status(Error::ConnectFailed, ErrorSource::Connect);
+    const auto status = last_error_to_status(Error::ConnectFailed);
     if (!status.would_block() && !status.has_error(SystemError::AlreadyInProgress) &&
         !status.has_error(SystemError::NowInProgress)) {
       close_socket_if_valid(connect_status);
@@ -1098,11 +1054,11 @@ sock::Result<sock::StreamSocket> sock::ConnectingSocket::connect() {
 
   const int connect_status = handle_eintr([&] {
     return ::connect(raw_socket_, reinterpret_cast<sockaddr*>(socket_address.get()),
-                     sockt_address_size);
+                     int(socket_address_size));
   });
 
   if (is_error(connect_status)) {
-    auto status = last_error_to_status(Error::ConnectFailed, ErrorSource::Connect);
+    auto status = last_error_to_status(Error::ConnectFailed);
     if (status.system_error != SystemError::AlreadyConnected) {
       auto is_expected_error = status.would_block() ||
                                status.has_error(SystemError::AlreadyInProgress) ||
@@ -1127,7 +1083,7 @@ sock::Result<sock::StreamSocket> sock::ConnectingSocket::connect() {
 
   raw_socket_ = detail::invalid_raw_socket;
   socket_address = {};
-  sockt_address_size = 0;
+  socket_address_size = 0;
 
   return {.status = {}, .value = StreamSocket{socket}};
 }
@@ -1137,7 +1093,7 @@ sock::Result<sock::Listener> sock::Listener::bind(const SocketAddress& address,
   const auto listener_socket = ::socket(address_type_to_protocol(address.type()), SOCK_STREAM, 0);
   if (!is_valid_socket(listener_socket)) {
     return {
-      .status = last_error_to_status(Error::SocketCreationFailed, ErrorSource::Socket),
+      .status = last_error_to_status(Error::SocketCreationFailed),
     };
   }
 
@@ -1156,16 +1112,16 @@ sock::Result<sock::Listener> sock::Listener::bind(const SocketAddress& address,
       bind_result = ::bind(listener_socket, socket_address, sockaddr_size);
     });
   if (is_error(bind_result)) {
-    const auto status = last_error_to_status(Error::BindFailed, ErrorSource::Bind);
+    const auto status = last_error_to_status(Error::BindFailed);
     close_socket_if_valid(listener_socket);
     return {
       .status = status,
     };
   }
 
-  const auto backlog_size = std::min(bind_parameters.max_pending_connections, SOMAXCONN);
+  const auto backlog_size = std::min(int(bind_parameters.max_pending_connections), SOMAXCONN);
   if (is_error(::listen(listener_socket, backlog_size))) {
-    const auto status = last_error_to_status(Error::ListenFailed, ErrorSource::Listen);
+    const auto status = last_error_to_status(Error::ListenFailed);
     close_socket_if_valid(listener_socket);
     return {
       .status = status,
@@ -1202,7 +1158,7 @@ sock::Result<sock::StreamSocket> sock::Listener::accept(SocketAddress* peer_addr
 
   if (!is_valid_socket(accepted_socket)) {
     return {
-      .status = last_error_to_status(Error::AcceptFailed, ErrorSource::Accept),
+      .status = last_error_to_status(Error::AcceptFailed),
     };
   }
 
@@ -1411,7 +1367,7 @@ class PollerImpl : public sock::Poller {
 
     if (is_error(poll_result)) {
       return {
-        .status = last_error_to_status(sock::Error::PollFailed, ErrorSource::Poll),
+        .status = last_error_to_status(sock::Error::PollFailed),
       };
     }
 
