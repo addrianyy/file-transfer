@@ -52,7 +52,6 @@ static bool run(std::span<const std::string_view> args) {
 
 int main(int argc, const char* argv[]) {
   base::initialize();
-  verify(sock::initialize(), "failed to initialize sockets");
 
   std::vector<std::string_view> args;
   for (int i = 1; i < argc; ++i) {

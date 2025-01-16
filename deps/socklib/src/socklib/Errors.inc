@@ -1,4 +1,5 @@
 X(None)
+X(InitializationFailed)
 X(SocketCreationFailed)
 X(CancellationFailed)
 X(BindFailed)

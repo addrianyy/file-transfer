@@ -41,6 +41,36 @@ struct SockaddrBuffer {
   alignas(32) uint8_t data[512];
 };
 
+static bool initialize_sockets() {
+#if defined(SOCKLIB_WINDOWS)
+  class InitializationGuard {
+    bool status_ = false;
+
+   public:
+    InitializationGuard() {
+      WSAData wsa_data{};
+      status_ = WSAStartup(MAKEWORD(2, 2), &wsa_data) == 0;
+    }
+
+    bool status() const { return status_; }
+  };
+  static InitializationGuard guard;
+  return guard.status();
+#else
+  return true;
+#endif
+}
+
+#if defined(SOCKLIB_WINDOWS)
+#define ENSURE_INITIALIZED()                                                 \
+  if (!initialize_sockets()) {                                               \
+    return {.status = {sock::Error::InitializationFailed, sock::Error::None, \
+                       sock::SystemError::NotInitialized}};                  \
+  }
+#else
+#define ENSURE_INITIALIZED()
+#endif
+
 static int address_type_to_protocol(sock::SocketAddress::Type type) {
   switch (type) {
     case sock::SocketAddress::Type::IpV4:
@@ -392,6 +422,8 @@ template <typename TSocketAddress>
 static sock::Result<std::vector<typename TSocketAddress::Ip>> resolve_ip_generic_many(
   int family,
   std::string_view hostname) {
+  ENSURE_INITIALIZED();
+
   addrinfo* resolved{};
   addrinfo hints{};
 
@@ -585,6 +617,8 @@ sock::Status sock::detail::RwSocket::set_broadcast_enabled(bool broadcast_enable
 sock::Result<sock::DatagramSocket> sock::DatagramSocket::bind(
   const SocketAddress& address,
   const BindParameters& bind_parameters) {
+  ENSURE_INITIALIZED();
+
   const auto datagram_socket = ::socket(address_type_to_protocol(address.type()), SOCK_DGRAM, 0);
   if (!is_valid_socket(datagram_socket)) {
     return {
@@ -633,6 +667,8 @@ sock::Result<sock::DatagramSocket> sock::DatagramSocket::bind(
 sock::Result<sock::DatagramSocket> sock::DatagramSocket::create(
   SocketAddress::Type type,
   const CreateParameters& create_parameters) {
+  ENSURE_INITIALIZED();
+
   const auto datagram_socket = ::socket(address_type_to_protocol(type), SOCK_DGRAM, 0);
   if (!is_valid_socket(datagram_socket)) {
     return {
@@ -721,6 +757,8 @@ sock::Result<size_t> sock::DatagramSocket::receive(SocketAddress& from,
 sock::Result<sock::StreamSocket> sock::StreamSocket::connect(
   const SocketAddress& address,
   const ConnectParameters& connect_parameters) {
+  ENSURE_INITIALIZED();
+
   const auto connection_socket = ::socket(address_type_to_protocol(address.type()), SOCK_STREAM, 0);
   if (!is_valid_socket(connection_socket)) {
     return {
@@ -818,6 +856,8 @@ static sock::Result<std::pair<sock::StreamSocket, sock::StreamSocket>> windows_s
 
 sock::Result<std::pair<sock::StreamSocket, sock::StreamSocket>> sock::StreamSocket::connected_pair(
   const ConnectedPairParameters& pair_parameters) {
+  ENSURE_INITIALIZED();
+
 #ifdef SOCKLIB_WINDOWS
   sock::Status last_status = {};
 
@@ -973,6 +1013,8 @@ sock::ConnectingSocket::ConnectingSocket(ConnectingSocket&& other) noexcept {
 sock::Result<sock::ConnectingSocket::SocketPair> sock::ConnectingSocket::initiate_connection(
   const SocketAddress& address,
   const ConnectParameters& connect_parameters) {
+  ENSURE_INITIALIZED();
+
   const auto connection_socket = ::socket(address_type_to_protocol(address.type()), SOCK_STREAM, 0);
   if (!is_valid_socket(connection_socket)) {
     return {
@@ -1072,6 +1114,8 @@ sock::Result<sock::StreamSocket> sock::ConnectingSocket::connect() {
 
 sock::Result<sock::Listener> sock::Listener::bind(const SocketAddress& address,
                                                   const BindParameters& bind_parameters) {
+  ENSURE_INITIALIZED();
+
   const auto listener_socket = ::socket(address_type_to_protocol(address.type()), SOCK_STREAM, 0);
   if (!is_valid_socket(listener_socket)) {
     return {
@@ -1414,6 +1458,9 @@ class PollerImpl : public sock::Poller {
 };
 
 std::unique_ptr<sock::Poller> sock::Poller::create() {
+  if (!initialize_sockets()) {
+    return nullptr;
+  }
   auto impl = std::make_unique<PollerImpl>();
   if (!*impl) {
     return nullptr;
@@ -1425,24 +1472,4 @@ bool sock::Poller::PollEntry::has_events(StatusEvents events) const {
 }
 bool sock::Poller::PollEntry::has_any_event(StatusEvents events) const {
   return (status_events & events) != StatusEvents::None;
-}
-
-bool sock::initialize() {
-#if defined(SOCKLIB_WINDOWS)
-  class InitializationGuard {
-    bool status_ = false;
-
-   public:
-    InitializationGuard() {
-      WSAData wsa_data{};
-      status_ = WSAStartup(MAKEWORD(2, 2), &wsa_data) == 0;
-    }
-
-    bool status() const { return status_; }
-  };
-  static InitializationGuard guard;
-  return guard.status();
-#else
-  return true;
-#endif
 }

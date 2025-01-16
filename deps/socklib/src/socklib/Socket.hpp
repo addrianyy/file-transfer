@@ -322,8 +322,6 @@ class Poller {
 SOCKLIB_IMPLEMENT_ENUM_BIT_OPERATIONS(Poller::QueryEvents)
 SOCKLIB_IMPLEMENT_ENUM_BIT_OPERATIONS(Poller::StatusEvents)
 
-[[nodiscard]] bool initialize();
-
 }  // namespace sock
 
 #undef SOCKLIB_IMPLEMENT_ENUM_BIT_OPERATIONS
