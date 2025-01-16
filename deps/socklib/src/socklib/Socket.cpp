@@ -408,13 +408,15 @@ static sock::Status setup_socket(sock::detail::RawSocket socket,
   return {};
 }
 
-template <typename TResult, typename TAddress>
-static TResult resolve_ip_generic(int family, std::string_view hostname) {
+template <typename TSocketAddress>
+static sock::Result<std::vector<typename TSocketAddress::Ip>> resolve_ip_generic_many(
+  int family,
+  std::string_view hostname) {
   addrinfo* resolved{};
   addrinfo hints{};
 
   hints.ai_family = family;
-  hints.ai_flags = AI_V4MAPPED | AI_ADDRCONFIG;
+  hints.ai_flags = AI_V4MAPPED | AI_ADDRCONFIG | AI_ALL;
 
   const auto hostname_s = std::string(hostname);
 
@@ -426,38 +428,69 @@ static TResult resolve_ip_generic(int family, std::string_view hostname) {
     };
   }
 
+  std::vector<typename TSocketAddress::Ip> ips;
+
   for (auto current = resolved; current; current = current->ai_next) {
     if (current->ai_family != hints.ai_family) {
       continue;
     }
 
-    if constexpr (std::is_same_v<TAddress, sock::IpV4Address>) {
+    if constexpr (std::is_same_v<TSocketAddress, sock::SocketIpV4Address>) {
       reinterpret_cast<sockaddr_in*>(current->ai_addr)->sin_port = 0;
-    } else if constexpr (std::is_same_v<TAddress, sock::IpV6Address>) {
+    } else if constexpr (std::is_same_v<TSocketAddress, sock::SocketIpV6Address>) {
       reinterpret_cast<sockaddr_in6*>(current->ai_addr)->sin6_port = 0;
     }
 
-    TAddress address;
+    TSocketAddress address;
     if (socket_address_convert_from_raw(current->ai_addr, address)) {
-      ::freeaddrinfo(resolved);
-      return {
-        .value = address.ip(),
-      };
+      ips.push_back(address.ip());
     }
   }
 
   ::freeaddrinfo(resolved);
-  return {
-    .status = {sock::Error::HostnameNotFound},
-  };
+
+  if (ips.empty()) {
+    return {
+      .status = {sock::Error::HostnameNotFound},
+    };
+  } else {
+    return {
+      .value = std::move(ips),
+    };
+  }
+}
+
+template <typename TSocketAddress>
+static sock::Result<typename TSocketAddress::Ip> resolve_ip_generic(int family,
+                                                                    std::string_view hostname) {
+  const auto [status, ips] = resolve_ip_generic_many<TSocketAddress>(family, hostname);
+  if (status) {
+    return {
+      .value = ips[0],
+    };
+  } else {
+    return {
+      .status = status,
+    };
+  }
 }
 
 sock::Result<sock::IpV4Address> sock::IpResolver::resolve_ipv4(std::string_view hostname) {
-  return resolve_ip_generic<Result<IpV4Address>, SocketIpV4Address>(AF_INET, hostname);
+  return resolve_ip_generic<SocketIpV4Address>(AF_INET, hostname);
 }
 
 sock::Result<sock::IpV6Address> sock::IpResolver::resolve_ipv6(std::string_view hostname) {
-  return resolve_ip_generic<Result<IpV6Address>, SocketIpV6Address>(AF_INET6, hostname);
+  return resolve_ip_generic<SocketIpV6Address>(AF_INET6, hostname);
+}
+
+sock::Result<std::vector<sock::IpV4Address>> sock::IpResolver::resolve_ipv4_many(
+  std::string_view hostname) {
+  return resolve_ip_generic_many<SocketIpV4Address>(AF_INET, hostname);
+}
+
+sock::Result<std::vector<sock::IpV6Address>> sock::IpResolver::resolve_ipv6_many(
+  std::string_view hostname) {
+  return resolve_ip_generic_many<SocketIpV6Address>(AF_INET6, hostname);
 }
 
 template <typename Result, typename Fn>
@@ -467,22 +500,38 @@ static Result resolve_and_run(sock::IpVersion ip_version,
                               Fn&& callback) {
   switch (ip_version) {
     case sock::IpVersion::V4: {
-      const auto resolved = sock::IpResolver::resolve_ipv4(hostname);
+      const auto resolved = sock::IpResolver::resolve_ipv4_many(hostname);
       if (!resolved) {
         return {
           .status = wrap_status(resolved.status, sock::Error::IpResolveFailed),
         };
       }
-      return callback(sock::SocketIpV4Address(resolved.value, port));
+      for (const auto& ip : resolved.value) {
+        auto result = callback(sock::SocketIpV4Address(ip, port));
+        if (result) {
+          return result;
+        }
+      }
+      return {
+        .status = {sock::Error::NoResolvedAddressWorked},
+      };
     }
     case sock::IpVersion::V6: {
-      const auto resolved = sock::IpResolver::resolve_ipv6(hostname);
+      const auto resolved = sock::IpResolver::resolve_ipv6_many(hostname);
       if (!resolved) {
         return {
           .status = wrap_status(resolved.status, sock::Error::IpResolveFailed),
         };
       }
-      return callback(sock::SocketIpV6Address(resolved.value, port));
+      for (const auto& ip : resolved.value) {
+        auto result = callback(sock::SocketIpV6Address(ip, port));
+        if (result) {
+          return result;
+        }
+      }
+      return {
+        .status = {sock::Error::NoResolvedAddressWorked},
+      };
     }
     default: {
       return {

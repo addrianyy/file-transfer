@@ -6,6 +6,7 @@
 #include <span>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "Address.hpp"
 #include "Status.hpp"
@@ -44,6 +45,9 @@ struct IpResolver {
   static Result<IpV4Address> resolve_ipv4(std::string_view hostname);
   static Result<IpV6Address> resolve_ipv6(std::string_view hostname);
 
+  static Result<std::vector<IpV4Address>> resolve_ipv4_many(std::string_view hostname);
+  static Result<std::vector<IpV6Address>> resolve_ipv6_many(std::string_view hostname);
+
   template <typename Ip>
   struct ForIp {};
 };
@@ -53,12 +57,20 @@ struct IpResolver::ForIp<IpV4Address> {
   static Result<IpV4Address> resolve(std::string_view hostname) {
     return IpResolver::resolve_ipv4(hostname);
   }
+
+  static Result<std::vector<IpV4Address>> resolve_many(std::string_view hostname) {
+    return IpResolver::resolve_ipv4_many(hostname);
+  }
 };
 
 template <>
 struct IpResolver::ForIp<IpV6Address> {
   static Result<IpV6Address> resolve(std::string_view hostname) {
     return IpResolver::resolve_ipv6(hostname);
+  }
+
+  static Result<std::vector<IpV6Address>> resolve_many(std::string_view hostname) {
+    return IpResolver::resolve_ipv6_many(hostname);
   }
 };
 
