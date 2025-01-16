@@ -56,7 +56,7 @@ template <typename Fn>
 static void socket_address_convert_to_raw(const sock::SocketAddress& address, Fn&& callback) {
   switch (address.type()) {
     case sock::SocketAddress::Type::IpV4: {
-      const auto address_ipv4 = static_cast<const sock::SocketIpV4Address&>(address);
+      const auto& address_ipv4 = static_cast<const sock::SocketIpV4Address&>(address);
       const auto components = address_ipv4.ip().components();
 
       sockaddr_in sockaddr_in{};
@@ -72,7 +72,7 @@ static void socket_address_convert_to_raw(const sock::SocketAddress& address, Fn
     }
 
     case sock::SocketAddress::Type::IpV6: {
-      const auto address_ipv6 = static_cast<const sock::SocketIpV6Address&>(address);
+      const auto& address_ipv6 = static_cast<const sock::SocketIpV6Address&>(address);
       const auto components = address_ipv6.ip().components();
 
       sockaddr_in6 sockaddr_in6{};
@@ -658,10 +658,6 @@ sock::Result<sock::DatagramSocket> sock::DatagramSocket::create(
 sock::Result<size_t> sock::DatagramSocket::send(const SocketAddress& to,
                                                 const void* data,
                                                 size_t data_size) {
-  if (data_size == 0) {
-    return {};
-  }
-
   if (data_size > std::numeric_limits<int>::max()) {
     return {
       .status = {Error::SendFailed, Error::SizeTooLarge},
@@ -676,11 +672,6 @@ sock::Result<size_t> sock::DatagramSocket::send(const SocketAddress& to,
     });
   });
 
-  if (result == 0) {
-    return {
-      .status = Status{Error::SendFailed, Error::None, SystemError::Disconnected},
-    };
-  }
   if (is_error_ext(result)) {
     return {
       .status = last_error_to_status(Error::SendFailed),
@@ -696,10 +687,6 @@ sock::Result<size_t> sock::DatagramSocket::send(const SocketAddress& to,
 sock::Result<size_t> sock::DatagramSocket::receive(SocketAddress& from,
                                                    void* data,
                                                    size_t data_size) {
-  if (data_size == 0) {
-    return {};
-  }
-
   if (data_size > std::numeric_limits<int>::max()) {
     return {
       .status = {Error::ReceiveFailed, Error::SizeTooLarge},
@@ -713,11 +700,6 @@ sock::Result<size_t> sock::DatagramSocket::receive(SocketAddress& from,
     return ::recvfrom(raw_socket_, reinterpret_cast<char*>(data), data_size, 0,
                       reinterpret_cast<sockaddr*>(socket_address.data), &socket_address_length);
   });
-  if (result == 0) {
-    return {
-      .status = Status{Error::ReceiveFailed, Error::None, SystemError::Disconnected},
-    };
-  }
   if (is_error_ext(result)) {
     return {
       .status = last_error_to_status(Error::ReceiveFailed),
