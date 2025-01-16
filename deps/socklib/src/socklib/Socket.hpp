@@ -87,19 +87,11 @@ class Socket {
   Status set_non_blocking(bool non_blocking);
 
   Status local_address(SocketAddress& address) const;
-  Status peer_address(SocketAddress& address) const;
 
   template <typename T>
   Result<T> local_address() const {
     T address{};
     const auto status = local_address(address);
-    return {.status = status, .value = address};
-  }
-
-  template <typename T>
-  Result<T> peer_address() const {
-    T address{};
-    const auto status = peer_address(address);
     return {.status = status, .value = address};
   }
 };
@@ -189,6 +181,15 @@ class StreamSocket : public detail::RwSocket {
   };
   static Result<std::pair<StreamSocket, StreamSocket>> connected_pair(
     const ConnectedPairParameters& pair_parameters = ConnectedPairParameters::default_parameters());
+
+  Status peer_address(SocketAddress& address) const;
+
+  template <typename T>
+  Result<T> peer_address() const {
+    T address{};
+    const auto status = peer_address(address);
+    return {.status = status, .value = address};
+  }
 
   Result<size_t> send(const void* data, size_t data_size);
   Result<size_t> send_all(const void* data, size_t data_size);

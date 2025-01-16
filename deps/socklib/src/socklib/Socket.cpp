@@ -541,22 +541,6 @@ sock::Status sock::Socket::local_address(SocketAddress& address) const {
   return {};
 }
 
-sock::Status sock::Socket::peer_address(SocketAddress& address) const {
-  SockaddrBuffer socket_address;
-  socklen_t socket_address_length = sizeof(socket_address);
-
-  if (is_error(::getpeername(raw_socket_, reinterpret_cast<sockaddr*>(socket_address.data),
-                             &socket_address_length))) {
-    return last_error_to_status(Error::GetPeerAddressFailed, ErrorSource::GetPeerName);
-  }
-
-  if (!socket_address_convert_from_raw(socket_address, address)) {
-    return Status{Error::GetPeerAddressFailed, Error::AddressConversionFailed};
-  }
-
-  return {};
-}
-
 sock::Status sock::detail::RwSocket::set_receive_timeout_ms(uint64_t timeout_ms) {
   return set_socket_option_timeout_ms(raw_socket_, SOL_SOCKET, SO_RCVTIMEO, timeout_ms);
 }
@@ -881,6 +865,22 @@ sock::Result<std::pair<sock::StreamSocket, sock::StreamSocket>> sock::StreamSock
   }
   return {.status = {}, .value = {StreamSocket{sockets[0]}, StreamSocket{sockets[1]}}};
 #endif
+}
+
+sock::Status sock::StreamSocket::peer_address(SocketAddress& address) const {
+  SockaddrBuffer socket_address;
+  socklen_t socket_address_length = sizeof(socket_address);
+
+  if (is_error(::getpeername(raw_socket_, reinterpret_cast<sockaddr*>(socket_address.data),
+                             &socket_address_length))) {
+    return last_error_to_status(Error::GetPeerAddressFailed, ErrorSource::GetPeerName);
+  }
+
+  if (!socket_address_convert_from_raw(socket_address, address)) {
+    return Status{Error::GetPeerAddressFailed, Error::AddressConversionFailed};
+  }
+
+  return {};
 }
 
 sock::Result<size_t> sock::StreamSocket::send(const void* data, size_t data_size) {
