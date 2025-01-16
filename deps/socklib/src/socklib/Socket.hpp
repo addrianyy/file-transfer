@@ -117,6 +117,8 @@ class RwSocket : public Socket {
  public:
   Status set_receive_timeout_ms(uint64_t timeout_ms);
   Status set_send_timeout_ms(uint64_t timeout_ms);
+  Status set_receive_buffer_size(size_t size);
+  Status set_send_buffer_size(size_t size);
   Status set_broadcast_enabled(bool broadcast_enabled);
 };
 
@@ -199,6 +201,8 @@ class StreamSocket : public detail::RwSocket {
     const auto status = peer_address(address);
     return {.status = status, .value = address};
   }
+
+  Status set_no_delay(bool enabled);
 
   Result<size_t> send(const void* data, size_t data_size);
   Result<size_t> send_all(const void* data, size_t data_size);

@@ -27,6 +27,7 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -610,6 +611,20 @@ sock::Status sock::detail::RwSocket::set_send_timeout_ms(uint64_t timeout_ms) {
   return set_socket_option_timeout_ms(raw_socket_, SOL_SOCKET, SO_SNDTIMEO, timeout_ms);
 }
 
+sock::Status sock::detail::RwSocket::set_receive_buffer_size(size_t size) {
+  if (size > std::numeric_limits<int>::max()) {
+    return {Error::SizeTooLarge};
+  }
+  return set_socket_option<int>(raw_socket_, SOL_SOCKET, SO_RCVBUF, int(size));
+}
+
+sock::Status sock::detail::RwSocket::set_send_buffer_size(size_t size) {
+  if (size > std::numeric_limits<int>::max()) {
+    return {Error::SizeTooLarge};
+  }
+  return set_socket_option<int>(raw_socket_, SOL_SOCKET, SO_SNDBUF, int(size));
+}
+
 sock::Status sock::detail::RwSocket::set_broadcast_enabled(bool broadcast_enabled) {
   return set_socket_option<int>(raw_socket_, SOL_SOCKET, SO_BROADCAST, broadcast_enabled ? 1 : 0);
 }
@@ -991,6 +1006,10 @@ sock::Result<size_t> sock::StreamSocket::receive(void* data, size_t data_size) {
     .status = {},
     .value = size_t(result),
   };
+}
+
+sock::Status sock::StreamSocket::set_no_delay(bool enabled) {
+  return set_socket_option<int>(raw_socket_, IPPROTO_TCP, TCP_NODELAY, enabled ? 1 : 0);
 }
 
 sock::ConnectingSocket::ConnectingSocket(detail::RawSocket raw_socket,
