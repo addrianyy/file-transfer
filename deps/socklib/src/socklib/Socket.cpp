@@ -5,7 +5,6 @@
 #include <chrono>
 #include <cstring>
 #include <limits>
-#include <optional>
 #include <string>
 #include <thread>
 
@@ -688,7 +687,7 @@ sock::Status sock::Socket::local_address(SocketAddress& address) const {
 
 sock::SystemError sock::Socket::last_error() {
   int error{};
-  int error_length = sizeof(error);
+  socklen_t error_length = sizeof(error);
   if (::getsockopt(raw_socket_, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&error),
                    &error_length) != 0) {
     return sock::SystemError::Unknown;
@@ -1609,13 +1608,13 @@ class PollerImpl : public sock::Poller {
 
   std::vector<RawEntry> raw_entries;
 
-  std::optional<PollCanceller> canceller;
+  std::unique_ptr<PollCanceller> canceller;
   std::atomic_bool cancel_pending{false};
 
  public:
   explicit PollerImpl(const CreateParameters& create_parameters) {
     if (create_parameters.enable_cancellation) {
-      canceller = PollCanceller{};
+      canceller = std::make_unique<PollCanceller>();
     }
   }
 
