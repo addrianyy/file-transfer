@@ -1,8 +1,11 @@
 #include <base/Initialization.hpp>
 #include <base/Platform.hpp>
 
+#include <base/io/Redirection.hpp>
 #include <base/logger/Logger.hpp>
-#include <base/logger/TerminalLogger.hpp>
+#include <base/logger/StdoutLogger.hpp>
+
+#include <cstdio>
 
 #ifdef PLATFORM_WINDOWS
 
@@ -35,7 +38,18 @@ static void initialize_colors() {}
 
 void base::initialize() {
   initialize_colors();
+
+  // Set stdout to line-buffering on Linux and no-buffering on Windows (Windows doesn't support
+  // line-buffering).
+#ifdef PLATFORM_WINDOWS
+  std::setvbuf(stdout, nullptr, _IONBF, 0);
+#else
+  std::setvbuf(stdout, nullptr, _IOLBF, 0);
+#endif
+
   if (!Logger::get()) {
-    Logger::set(std::make_unique<TerminalLogger>());
+    const bool allow_colors = !base::is_stdout_redirected();
+
+    Logger::set(std::make_unique<StdoutLogger>(allow_colors));
   }
 }

@@ -1,5 +1,6 @@
 #include "Address.hpp"
 
+#include <cstring>
 #include <ios>
 #include <sstream>
 
@@ -92,6 +93,30 @@ std::string SocketIpV6Address::stringify_v6() const {
   std::ostringstream os;
   os << '[' << ip_.stringify() << "]:" << port_;
   return os.str();
+}
+
+SocketUnixAddress::SocketUnixAddress(Namespace socket_namespace, std::string_view path)
+    : SocketAddress(Type::Unix), socket_namespace_(socket_namespace), path_size_(path.size()) {
+  std::memcpy(path_.data(), path.data(), path.size());
+}
+
+std::optional<SocketUnixAddress> SocketUnixAddress::create(Namespace socket_namespace,
+                                                           std::string_view path) {
+  if constexpr (!abstract_namespace_supported) {
+    if (socket_namespace == Namespace::Abstract) {
+      return std::nullopt;
+    }
+  }
+
+  if (path.empty() || path.size() > max_path_size) {
+    return std::nullopt;
+  }
+
+  if (path[0] == 0) {
+    return std::nullopt;
+  }
+
+  return SocketUnixAddress{socket_namespace, path};
 }
 
 }  // namespace sock

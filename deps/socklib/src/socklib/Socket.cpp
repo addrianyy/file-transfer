@@ -2,9 +2,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <string>
+#include <thread>
 
 #if defined(_WIN32)
 #define SOCKLIB_WINDOWS
@@ -23,6 +26,8 @@
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
+
+#include <afunix.h>
 #else
 #include <fcntl.h>
 #include <netdb.h>
@@ -31,6 +36,7 @@
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/un.h>
 #include <unistd.h>
 #endif
 
@@ -39,7 +45,7 @@
 #endif
 
 struct SockaddrBuffer {
-  alignas(32) uint8_t data[512];
+  alignas(32) uint8_t data[sizeof(sockaddr_storage)];
 };
 
 static bool initialize_sockets() {
@@ -50,7 +56,11 @@ static bool initialize_sockets() {
    public:
     InitializationGuard() {
       WSAData wsa_data{};
-      status_ = WSAStartup(MAKEWORD(2, 2), &wsa_data) == 0;
+      const auto version = MAKEWORD(2, 2);
+      status_ = WSAStartup(version, &wsa_data) == 0;
+      if (wsa_data.wVersion != version) {
+        status_ = false;
+      }
     }
 
     bool status() const { return status_; }
@@ -78,10 +88,18 @@ static int address_type_to_protocol(sock::SocketAddress::Type type) {
       return AF_INET;
     case sock::SocketAddress::Type::IpV6:
       return AF_INET6;
+    case sock::SocketAddress::Type::Unix:
+      return AF_UNIX;
     default:
       return AF_MAX;
   }
 }
+
+constexpr static size_t sockaddr_un_max_path_size = sizeof(::sockaddr_un{}.sun_path);
+static_assert(sockaddr_un_max_path_size >= (sock::SocketUnixAddress::max_path_size + 1),
+              "unix socket path is shorter than expected");
+constexpr static size_t sockaddr_un_header_size =
+  sizeof(::sockaddr_un{}) - sockaddr_un_max_path_size;
 
 template <typename Fn>
 static void socket_address_convert_to_raw(const sock::SocketAddress& address, Fn&& callback) {
@@ -125,16 +143,42 @@ static void socket_address_convert_to_raw(const sock::SocketAddress& address, Fn
       break;
     }
 
+    case sock::SocketAddress::Type::Unix: {
+      const auto& address_unix = static_cast<const sock::SocketUnixAddress&>(address);
+      const auto address_path = address_unix.path();
+
+      sockaddr_un sockaddr_un{};
+      sockaddr_un.sun_family = AF_UNIX;
+
+      {
+        // We have zeroed the sockaddr_un structure so we don't need to null terminate or set zero
+        // byte at the beginning.
+        const auto offset =
+          address_unix.socket_namespace() == sock::SocketUnixAddress::Namespace::Abstract ? 1 : 0;
+        std::memcpy(sockaddr_un.sun_path + offset, address_path.data(), address_path.size());
+      }
+
+      // Always add one because we are either null terminating or adding 0 prefix for abstract
+      // sockets.
+      const auto address_path_bytes = address_path.size() + 1;
+
+      callback(reinterpret_cast<const sockaddr*>(&sockaddr_un),
+               socklen_t(sockaddr_un_header_size + address_path_bytes));
+
+      break;
+    }
+
     default:
       break;
   }
 }
 
 static bool socket_address_convert_from_raw(const sockaddr* sockaddr_buffer,
+                                            socklen_t sockaddr_size,
                                             sock::SocketAddress& address) {
   switch (address.type()) {
     case sock::SocketAddress::Type::IpV4: {
-      if (sockaddr_buffer->sa_family != AF_INET) {
+      if (sockaddr_buffer->sa_family != AF_INET || sockaddr_size < sizeof(sockaddr_in)) {
         return false;
       }
 
@@ -151,7 +195,7 @@ static bool socket_address_convert_from_raw(const sockaddr* sockaddr_buffer,
     }
 
     case sock::SocketAddress::Type::IpV6: {
-      if (sockaddr_buffer->sa_family != AF_INET6) {
+      if (sockaddr_buffer->sa_family != AF_INET6 || sockaddr_size < sizeof(sockaddr_in6)) {
         return false;
       }
 
@@ -173,15 +217,54 @@ static bool socket_address_convert_from_raw(const sockaddr* sockaddr_buffer,
 
       return true;
     }
-  }
 
-  return false;
+    case sock::SocketAddress::Type::Unix: {
+      // Fail on zero sized path.
+      if (sockaddr_buffer->sa_family != AF_UNIX || sockaddr_size <= sockaddr_un_header_size) {
+        return false;
+      }
+
+      // Always > 0.
+      const auto unix_path_buffer =
+        std::span<const char>(reinterpret_cast<const sockaddr_un*>(sockaddr_buffer)->sun_path,
+                              size_t(sockaddr_size - sockaddr_un_header_size));
+
+      sock::SocketUnixAddress::Namespace socket_namespace{};
+      std::string_view unix_path{};
+
+      if (unix_path_buffer[0] == 0) {
+        const auto actual_path = unix_path_buffer.subspan(1);
+
+        socket_namespace = sock::SocketUnixAddress::Namespace::Abstract;
+        unix_path = std::string_view{actual_path.data(), actual_path.size()};
+      } else {
+        socket_namespace = sock::SocketUnixAddress::Namespace::Filesystem;
+        unix_path = std::string_view{unix_path_buffer.data(), unix_path_buffer.size()};
+
+        const auto null_terminator = unix_path.find_first_of('\0');
+        if (null_terminator != std::string_view::npos) {
+          unix_path = unix_path.substr(0, null_terminator);
+        }
+      }
+
+      const auto conveted_address = sock::SocketUnixAddress::create(socket_namespace, unix_path);
+      if (conveted_address) {
+        *reinterpret_cast<sock::SocketUnixAddress*>(&address) = *conveted_address;
+      } else {
+        return false;
+      }
+    }
+
+    default:
+      return false;
+  }
 }
 
-static bool socket_address_convert_from_raw(const SockaddrBuffer& buffer,
+static bool socket_address_convert_from_raw(const SockaddrBuffer& sockaddr_buffer,
+                                            socklen_t sockaddr_size,
                                             sock::SocketAddress& address) {
-  auto const sockaddr_buffer = reinterpret_cast<const sockaddr*>(buffer.data);
-  return socket_address_convert_from_raw(sockaddr_buffer, address);
+  return socket_address_convert_from_raw(reinterpret_cast<const sockaddr*>(sockaddr_buffer.data),
+                                         sockaddr_size, address);
 }
 
 #if defined(SOCKLIB_WINDOWS)
@@ -213,15 +296,15 @@ static void close_socket_if_valid(sock::detail::RawSocket socket) {
   }
 }
 
-static sock::SystemError last_error_to_system_error() {
+static sock::SystemError error_to_system_error(int error_num) {
   using EC = sock::SystemError;
 
 #if defined(SOCKLIB_WINDOWS)
-  const auto error_num = WSAGetLastError();
-
   switch (error_num) {
     case WSAEISCONN:
       return EC::AlreadyConnected;
+    case WSAENOTCONN:
+      return EC::NotConnected;
     case WSANOTINITIALISED:
       return EC::NotInitialized;
     case WSAENETDOWN:
@@ -261,11 +344,11 @@ static sock::SystemError last_error_to_system_error() {
       return EC::Unknown;
   }
 #else
-  const auto error_num = errno;
-
   switch (error_num) {
     case EISCONN:
       return EC::AlreadyConnected;
+    case ENOTCONN:
+      return EC::NotConnected;
     case ENETDOWN:
       return EC::NetworkSubsystemFailed;
     case EACCES:
@@ -303,6 +386,14 @@ static sock::SystemError last_error_to_system_error() {
     default:
       return EC::Unknown;
   }
+#endif
+}
+
+static sock::SystemError last_error_to_system_error() {
+#if defined(SOCKLIB_WINDOWS)
+  return error_to_system_error(WSAGetLastError());
+#else
+  return error_to_system_error(errno);
 #endif
 }
 
@@ -348,10 +439,10 @@ static sock::Status set_socket_option_timeout_ms(sock::detail::RawSocket socket,
                                                  int option,
                                                  uint64_t timeout_ms) {
 #if defined(SOCKLIB_WINDOWS)
-  if (timeout_ms > std::numeric_limits<int>::max()) {
+  if (timeout_ms > std::numeric_limits<uint32_t>::max()) {
     return sock::Status{sock::Error::SetSocketOptionFailed, sock::Error::TimeoutTooLarge};
   }
-  return set_socket_option<int>(socket, level, option, timeout_ms);
+  return set_socket_option<uint32_t>(socket, level, option, timeout_ms);
 #else
   timeval timeout_timeval{};
   timeout_timeval.tv_sec = static_cast<long>(timeout_ms / 1000);
@@ -362,7 +453,7 @@ static sock::Status set_socket_option_timeout_ms(sock::detail::RawSocket socket,
 
 static sock::Status set_socket_non_blocking(sock::detail::RawSocket socket, bool non_blocking) {
 #if defined(SOCKLIB_WINDOWS)
-  u_long non_blocking_value = static_cast<u_long>(non_blocking);
+  auto non_blocking_value = static_cast<u_long>(non_blocking);
   if (is_error(::ioctlsocket(socket, FIONBIO, &non_blocking_value))) {
     return last_error_to_status(sock::Error::SetSocketBlockingFailed);
   }
@@ -420,7 +511,7 @@ static sock::Status setup_socket(sock::detail::RawSocket socket,
 }
 
 template <typename TSocketAddress>
-static sock::Result<std::vector<typename TSocketAddress::Ip>> resolve_ip_generic_many(
+static sock::Result<std::vector<typename TSocketAddress::Ip>> resolve_ip_generic(
   int family,
   std::string_view hostname) {
   ENSURE_INITIALIZED();
@@ -448,14 +539,21 @@ static sock::Result<std::vector<typename TSocketAddress::Ip>> resolve_ip_generic
       continue;
     }
 
-    if constexpr (std::is_same_v<TSocketAddress, sock::SocketIpV4Address>) {
+    constexpr bool is_ipv4 = std::is_same_v<TSocketAddress, sock::SocketIpV4Address>;
+    constexpr bool is_ipv6 = std::is_same_v<TSocketAddress, sock::SocketIpV6Address>;
+    static_assert(is_ipv4 || is_ipv6, "invalid address type");
+
+    socklen_t sockaddr_size{};
+    if constexpr (is_ipv4) {
       reinterpret_cast<sockaddr_in*>(current->ai_addr)->sin_port = 0;
-    } else if constexpr (std::is_same_v<TSocketAddress, sock::SocketIpV6Address>) {
+      sockaddr_size = sizeof(sockaddr_in);
+    } else if constexpr (is_ipv6) {
       reinterpret_cast<sockaddr_in6*>(current->ai_addr)->sin6_port = 0;
+      sockaddr_size = sizeof(sockaddr_in6);
     }
 
     TSocketAddress address;
-    if (socket_address_convert_from_raw(current->ai_addr, address)) {
+    if (socket_address_convert_from_raw(current->ai_addr, sockaddr_size, address)) {
       ips.push_back(address.ip());
     }
   }
@@ -473,37 +571,14 @@ static sock::Result<std::vector<typename TSocketAddress::Ip>> resolve_ip_generic
   }
 }
 
-template <typename TSocketAddress>
-static sock::Result<typename TSocketAddress::Ip> resolve_ip_generic(int family,
-                                                                    std::string_view hostname) {
-  const auto [status, ips] = resolve_ip_generic_many<TSocketAddress>(family, hostname);
-  if (status) {
-    return {
-      .value = ips[0],
-    };
-  } else {
-    return {
-      .status = status,
-    };
-  }
-}
-
-sock::Result<sock::IpV4Address> sock::IpResolver::resolve_ipv4(std::string_view hostname) {
+sock::Result<std::vector<sock::IpV4Address>> sock::IpResolver::resolve_ipv4(
+  std::string_view hostname) {
   return resolve_ip_generic<SocketIpV4Address>(AF_INET, hostname);
 }
 
-sock::Result<sock::IpV6Address> sock::IpResolver::resolve_ipv6(std::string_view hostname) {
+sock::Result<std::vector<sock::IpV6Address>> sock::IpResolver::resolve_ipv6(
+  std::string_view hostname) {
   return resolve_ip_generic<SocketIpV6Address>(AF_INET6, hostname);
-}
-
-sock::Result<std::vector<sock::IpV4Address>> sock::IpResolver::resolve_ipv4_many(
-  std::string_view hostname) {
-  return resolve_ip_generic_many<SocketIpV4Address>(AF_INET, hostname);
-}
-
-sock::Result<std::vector<sock::IpV6Address>> sock::IpResolver::resolve_ipv6_many(
-  std::string_view hostname) {
-  return resolve_ip_generic_many<SocketIpV6Address>(AF_INET6, hostname);
 }
 
 template <typename Result, typename Fn>
@@ -513,37 +588,45 @@ static Result resolve_and_run(sock::IpVersion ip_version,
                               Fn&& callback) {
   switch (ip_version) {
     case sock::IpVersion::V4: {
-      const auto resolved = sock::IpResolver::resolve_ipv4_many(hostname);
+      const auto resolved = sock::IpResolver::resolve_ipv4(hostname);
       if (!resolved) {
         return {
           .status = wrap_status(resolved.status, sock::Error::IpResolveFailed),
         };
       }
+      sock::Status error_status{};
       for (const auto& ip : resolved.value) {
         auto result = callback(sock::SocketIpV4Address(ip, port));
         if (result) {
           return result;
         }
+        if (error_status) {
+          error_status = result.status;
+        }
       }
       return {
-        .status = {sock::Error::NoResolvedAddressWorked},
+        .status = error_status,
       };
     }
     case sock::IpVersion::V6: {
-      const auto resolved = sock::IpResolver::resolve_ipv6_many(hostname);
+      const auto resolved = sock::IpResolver::resolve_ipv6(hostname);
       if (!resolved) {
         return {
           .status = wrap_status(resolved.status, sock::Error::IpResolveFailed),
         };
       }
+      sock::Status error_status{};
       for (const auto& ip : resolved.value) {
         auto result = callback(sock::SocketIpV6Address(ip, port));
         if (result) {
           return result;
         }
+        if (error_status) {
+          error_status = result.status;
+        }
       }
       return {
-        .status = {sock::Error::NoResolvedAddressWorked},
+        .status = error_status,
       };
     }
     default: {
@@ -589,18 +672,33 @@ sock::Status sock::Socket::set_non_blocking(bool non_blocking) {
 
 sock::Status sock::Socket::local_address(SocketAddress& address) const {
   SockaddrBuffer socket_address;
-  socklen_t socket_address_length = sizeof(socket_address);
+  socklen_t sockaddr_size = sizeof(socket_address);
 
   if (is_error(::getsockname(raw_socket_, reinterpret_cast<sockaddr*>(socket_address.data),
-                             &socket_address_length))) {
+                             &sockaddr_size))) {
     return last_error_to_status(Error::GetLocalAddressFailed);
   }
 
-  if (!socket_address_convert_from_raw(socket_address, address)) {
+  if (!socket_address_convert_from_raw(socket_address, sockaddr_size, address)) {
     return Status{Error::GetLocalAddressFailed, Error::AddressConversionFailed};
   }
 
   return {};
+}
+
+sock::SystemError sock::Socket::last_error() {
+  int error{};
+  int error_length = sizeof(error);
+  if (::getsockopt(raw_socket_, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&error),
+                   &error_length) != 0) {
+    return sock::SystemError::Unknown;
+  }
+
+  if (error == 0) {
+    return sock::SystemError::None;
+  }
+
+  return error_to_system_error(error);
 }
 
 sock::Status sock::detail::RwSocket::set_receive_timeout_ms(uint64_t timeout_ms) {
@@ -625,8 +723,83 @@ sock::Status sock::detail::RwSocket::set_send_buffer_size(size_t size) {
   return set_socket_option<int>(raw_socket_, SOL_SOCKET, SO_SNDBUF, int(size));
 }
 
-sock::Status sock::detail::RwSocket::set_broadcast_enabled(bool broadcast_enabled) {
-  return set_socket_option<int>(raw_socket_, SOL_SOCKET, SO_BROADCAST, broadcast_enabled ? 1 : 0);
+sock::Result<size_t> sock::DatagramSocket::send_to_internal(const sock::SocketAddress* to,
+                                                            const void* data,
+                                                            size_t data_size) {
+  if (data_size > std::numeric_limits<int>::max()) {
+    return {
+      .status = {Error::SendFailed, Error::SizeTooLarge},
+    };
+  }
+
+  intptr_t result{default_error_value};
+  if (to) {
+    socket_address_convert_to_raw(
+      *to, [&](const sockaddr* socket_address, socklen_t sockaddr_size) {
+        result = handle_eintr([&] {
+          return ::sendto(raw_socket_, reinterpret_cast<const char*>(data), data_size, MSG_NOSIGNAL,
+                          socket_address, sockaddr_size);
+        });
+      });
+  } else {
+    result = handle_eintr([&] {
+      return ::send(raw_socket_, reinterpret_cast<const char*>(data), data_size, MSG_NOSIGNAL);
+    });
+  }
+
+  if (is_error_ext(result)) {
+    return {
+      .status = last_error_to_status(Error::SendFailed),
+    };
+  }
+
+  return {
+    .status = {},
+    .value = size_t(result),
+  };
+}
+
+sock::Result<size_t> sock::DatagramSocket::receive_from_internal(sock::SocketAddress* from,
+                                                                 void* data,
+                                                                 size_t data_size) {
+  if (data_size > std::numeric_limits<int>::max()) {
+    return {
+      .status = {Error::ReceiveFailed, Error::SizeTooLarge},
+    };
+  }
+
+  SockaddrBuffer socket_address;
+  socklen_t sockaddr_size = sizeof(socket_address);
+
+  intptr_t result = 0;
+  if (from) {
+    result = handle_eintr([&] {
+      return ::recvfrom(raw_socket_, reinterpret_cast<char*>(data), data_size, 0,
+                        reinterpret_cast<sockaddr*>(socket_address.data), &sockaddr_size);
+    });
+  } else {
+    result = handle_eintr(
+      [&] { return ::recv(raw_socket_, reinterpret_cast<char*>(data), data_size, 0); });
+  }
+
+  if (is_error_ext(result)) {
+    return {
+      .status = last_error_to_status(Error::ReceiveFailed),
+    };
+  }
+
+  if (from) {
+    if (!socket_address_convert_from_raw(socket_address, sockaddr_size, *from)) {
+      return {
+        .status = {Error::ReceiveFailed, Error::AddressConversionFailed},
+      };
+    }
+  }
+
+  return {
+    .status = {},
+    .value = size_t(result),
+  };
 }
 
 sock::Result<sock::DatagramSocket> sock::DatagramSocket::bind(
@@ -706,67 +879,89 @@ sock::Result<sock::DatagramSocket> sock::DatagramSocket::create(
   };
 }
 
-sock::Result<size_t> sock::DatagramSocket::send(const SocketAddress& to,
-                                                const void* data,
-                                                size_t data_size) {
-  if (data_size > std::numeric_limits<int>::max()) {
+sock::Result<sock::DatagramSocket> sock::DatagramSocket::connect(
+  const sock::SocketAddress& address,
+  const sock::DatagramSocket::ConnectParameters& connect_parameters) {
+  ENSURE_INITIALIZED();
+
+  const auto datagram_socket = ::socket(address_type_to_protocol(address.type()), SOCK_DGRAM, 0);
+  if (!is_valid_socket(datagram_socket)) {
     return {
-      .status = {Error::SendFailed, Error::SizeTooLarge},
+      .status = last_error_to_status(Error::SocketCreationFailed),
     };
   }
 
-  intptr_t result{default_error_value};
-  socket_address_convert_to_raw(to, [&](const sockaddr* socket_address, socklen_t sockaddr_size) {
-    result = handle_eintr([&] {
-      return ::sendto(raw_socket_, reinterpret_cast<const char*>(data), data_size, MSG_NOSIGNAL,
-                      socket_address, sockaddr_size);
-    });
-  });
-
-  if (is_error_ext(result)) {
+  // Set non-blocking state later after we estabilish the connection.
+  const auto setup_status = setup_socket(datagram_socket, false, false, false);
+  if (!setup_status) {
+    close_socket_if_valid(datagram_socket);
     return {
-      .status = last_error_to_status(Error::SendFailed),
+      .status = setup_status,
     };
+  }
+
+  int connect_status{default_error_value};
+  socket_address_convert_to_raw(address, [&](const sockaddr* sockaddr, socklen_t sockaddr_size) {
+    connect_status =
+      handle_eintr([&] { return ::connect(datagram_socket, sockaddr, sockaddr_size); });
+  });
+  if (is_error(connect_status)) {
+    const auto status = last_error_to_status(Error::ConnectFailed);
+    close_socket_if_valid(connect_status);
+    return {
+      .status = status,
+    };
+  }
+
+  if (connect_parameters.non_blocking) {
+    const auto non_blocking_status = set_socket_non_blocking(datagram_socket, true);
+    if (!non_blocking_status) {
+      close_socket_if_valid(datagram_socket);
+      return {
+        .status = wrap_status(non_blocking_status, Error::ConnectFailed),
+      };
+    }
   }
 
   return {
     .status = {},
-    .value = size_t(result),
+    .value = DatagramSocket{datagram_socket},
   };
 }
 
-sock::Result<size_t> sock::DatagramSocket::receive(SocketAddress& from,
-                                                   void* data,
+sock::Result<sock::DatagramSocket> sock::DatagramSocket::connect(
+  sock::IpVersion ip_version,
+  std::string_view hostname,
+  uint16_t port,
+  const sock::DatagramSocket::ConnectParameters& connect_parameters) {
+  return resolve_and_run<Result<DatagramSocket>>(
+    ip_version, hostname, port, [&](const SocketAddress& resolved_address) {
+      return connect(resolved_address, connect_parameters);
+    });
+}
+
+sock::Status sock::DatagramSocket::set_broadcast_enabled(bool broadcast_enabled) {
+  return set_socket_option<int>(raw_socket_, SOL_SOCKET, SO_BROADCAST, broadcast_enabled ? 1 : 0);
+}
+
+sock::Result<size_t> sock::DatagramSocket::send_to(const SocketAddress& to,
+                                                   const void* data,
                                                    size_t data_size) {
-  if (data_size > std::numeric_limits<int>::max()) {
-    return {
-      .status = {Error::ReceiveFailed, Error::SizeTooLarge},
-    };
-  }
+  return send_to_internal(&to, data, data_size);
+}
 
-  SockaddrBuffer socket_address;
-  socklen_t socket_address_length = sizeof(socket_address);
+sock::Result<size_t> sock::DatagramSocket::receive_from(SocketAddress& from,
+                                                        void* data,
+                                                        size_t data_size) {
+  return receive_from_internal(&from, data, data_size);
+}
 
-  const auto result = handle_eintr([&] {
-    return ::recvfrom(raw_socket_, reinterpret_cast<char*>(data), data_size, 0,
-                      reinterpret_cast<sockaddr*>(socket_address.data), &socket_address_length);
-  });
-  if (is_error_ext(result)) {
-    return {
-      .status = last_error_to_status(Error::ReceiveFailed),
-    };
-  }
+sock::Result<size_t> sock::DatagramSocket::send(const void* data, size_t data_size) {
+  return send_to_internal(nullptr, data, data_size);
+}
 
-  if (!socket_address_convert_from_raw(socket_address, from)) {
-    return {
-      .status = {Error::ReceiveFailed, Error::AddressConversionFailed},
-    };
-  }
-
-  return {
-    .status = {},
-    .value = size_t(result),
-  };
+sock::Result<size_t> sock::DatagramSocket::receive(void* data, size_t data_size) {
+  return receive_from_internal(nullptr, data, data_size);
 }
 
 sock::Result<sock::StreamSocket> sock::StreamSocket::connect(
@@ -781,6 +976,7 @@ sock::Result<sock::StreamSocket> sock::StreamSocket::connect(
     };
   }
 
+  // Set non-blocking state later after we estabilish the connection.
   const auto setup_status = setup_socket(connection_socket, false, false, false);
   if (!setup_status) {
     close_socket_if_valid(connection_socket);
@@ -800,6 +996,16 @@ sock::Result<sock::StreamSocket> sock::StreamSocket::connect(
     return {
       .status = status,
     };
+  }
+
+  if (connect_parameters.non_blocking) {
+    const auto non_blocking_status = set_socket_non_blocking(connection_socket, true);
+    if (!non_blocking_status) {
+      close_socket_if_valid(connection_socket);
+      return {
+        .status = wrap_status(non_blocking_status, Error::ConnectFailed),
+      };
+    }
   }
 
   return {
@@ -837,7 +1043,7 @@ static sock::Result<std::pair<sock::StreamSocket, sock::StreamSocket>> windows_s
     return {.status = local_address_status};
   }
 
-  auto [connect_status, connection] = sock::ConnectingSocket::initiate_connection(
+  auto [connect_status, connection] = sock::ConnectingStreamSocket::initiate_connection(
     Address{Address::Ip::loopback(), local_address.port()});
   if (!connect_status) {
     return {.status = connect_status};
@@ -911,18 +1117,26 @@ sock::Result<std::pair<sock::StreamSocket, sock::StreamSocket>> sock::StreamSock
 
 sock::Status sock::StreamSocket::peer_address(SocketAddress& address) const {
   SockaddrBuffer socket_address;
-  socklen_t socket_address_length = sizeof(socket_address);
+  socklen_t sockaddr_size = sizeof(socket_address);
 
   if (is_error(::getpeername(raw_socket_, reinterpret_cast<sockaddr*>(socket_address.data),
-                             &socket_address_length))) {
+                             &sockaddr_size))) {
     return last_error_to_status(Error::GetPeerAddressFailed);
   }
 
-  if (!socket_address_convert_from_raw(socket_address, address)) {
+  if (!socket_address_convert_from_raw(socket_address, sockaddr_size, address)) {
     return Status{Error::GetPeerAddressFailed, Error::AddressConversionFailed};
   }
 
   return {};
+}
+
+sock::Status sock::StreamSocket::set_keep_alive(bool keep_alive_enabled) {
+  return set_socket_option<int>(raw_socket_, SOL_SOCKET, SO_KEEPALIVE, keep_alive_enabled ? 1 : 0);
+}
+
+sock::Status sock::StreamSocket::set_no_delay(bool no_delay_enabled) {
+  return set_socket_option<int>(raw_socket_, IPPROTO_TCP, TCP_NODELAY, no_delay_enabled ? 1 : 0);
 }
 
 sock::Result<size_t> sock::StreamSocket::send(const void* data, size_t data_size) {
@@ -1008,18 +1222,36 @@ sock::Result<size_t> sock::StreamSocket::receive(void* data, size_t data_size) {
   };
 }
 
-sock::Status sock::StreamSocket::set_no_delay(bool enabled) {
-  return set_socket_option<int>(raw_socket_, IPPROTO_TCP, TCP_NODELAY, enabled ? 1 : 0);
+sock::Result<size_t> sock::StreamSocket::receive_exact(void* data, size_t data_size) {
+  auto current = reinterpret_cast<uint8_t*>(data);
+  size_t bytes_received = 0;
+
+  while (bytes_received < data_size) {
+    const auto [status, current_received] = receive(current, data_size - bytes_received);
+    if (!status) {
+      return {
+        .status = status,
+        .value = bytes_received,
+      };
+    }
+    current += current_received;
+    bytes_received += current_received;
+  }
+
+  return {
+    .status = {},
+    .value = bytes_received,
+  };
 }
 
-sock::ConnectingSocket::ConnectingSocket(detail::RawSocket raw_socket,
-                                         std::unique_ptr<uint64_t[]> socket_address,
-                                         size_t socket_address_size)
+sock::ConnectingStreamSocket::ConnectingStreamSocket(detail::RawSocket raw_socket,
+                                                     std::unique_ptr<uint64_t[]> socket_address,
+                                                     size_t socket_address_size)
     : Socket(raw_socket),
       socket_address(std::move(socket_address)),
       socket_address_size(socket_address_size) {}
 
-sock::ConnectingSocket::ConnectingSocket(ConnectingSocket&& other) noexcept {
+sock::ConnectingStreamSocket::ConnectingStreamSocket(ConnectingStreamSocket&& other) noexcept {
   raw_socket_ = other.raw_socket_;
   socket_address = std::move(other.socket_address);
   socket_address_size = other.socket_address_size;
@@ -1029,7 +1261,8 @@ sock::ConnectingSocket::ConnectingSocket(ConnectingSocket&& other) noexcept {
   other.socket_address_size = 0;
 }
 
-sock::ConnectingSocket& sock::ConnectingSocket::operator=(sock::ConnectingSocket&& other) noexcept {
+sock::ConnectingStreamSocket& sock::ConnectingStreamSocket::operator=(
+  sock::ConnectingStreamSocket&& other) noexcept {
   if (this != &other) {
     close_socket_if_valid(raw_socket_);
 
@@ -1045,9 +1278,9 @@ sock::ConnectingSocket& sock::ConnectingSocket::operator=(sock::ConnectingSocket
   return *this;
 }
 
-sock::Result<sock::ConnectingSocket::SocketPair> sock::ConnectingSocket::initiate_connection(
-  const SocketAddress& address,
-  const ConnectParameters& connect_parameters) {
+sock::Result<sock::ConnectingStreamSocket::SocketPair>
+sock::ConnectingStreamSocket::initiate_connection(const SocketAddress& address,
+                                                  const ConnectParameters& connect_parameters) {
   ENSURE_INITIALIZED();
 
   const auto connection_socket = ::socket(address_type_to_protocol(address.type()), SOCK_STREAM, 0);
@@ -1092,19 +1325,19 @@ sock::Result<sock::ConnectingSocket::SocketPair> sock::ConnectingSocket::initiat
 
     return {
       .status = {},
-      .value = {ConnectingSocket{connection_socket, std::move(socket_address_buffer),
-                                 socket_address_size},
+      .value = {ConnectingStreamSocket{connection_socket, std::move(socket_address_buffer),
+                                       socket_address_size},
                 StreamSocket{}},
     };
   } else {
     return {
       .status = {},
-      .value = {ConnectingSocket{}, StreamSocket{connection_socket}},
+      .value = {ConnectingStreamSocket{}, StreamSocket{connection_socket}},
     };
   }
 }
 
-sock::Result<sock::StreamSocket> sock::ConnectingSocket::connect() {
+sock::Result<sock::StreamSocket> sock::ConnectingStreamSocket::connect() {
   if (raw_socket_ == detail::invalid_raw_socket) {
     return {
       .status = Status{Error::ConnectFailed, Error::None, SystemError::None},
@@ -1206,12 +1439,12 @@ sock::Result<sock::Listener> sock::Listener::bind(IpVersion ip_version,
 
 sock::Result<sock::StreamSocket> sock::Listener::accept(SocketAddress* peer_address) {
   SockaddrBuffer socket_address;
-  socklen_t socket_address_length = sizeof(socket_address);
+  socklen_t sockaddr_size = sizeof(socket_address);
 
   const detail::RawSocket accepted_socket = handle_eintr([&]() -> detail::RawSocket {
     if (peer_address) {
       return ::accept(raw_socket_, reinterpret_cast<sockaddr*>(socket_address.data),
-                      &socket_address_length);
+                      &sockaddr_size);
     } else {
       return ::accept(raw_socket_, nullptr, nullptr);
     }
@@ -1224,7 +1457,7 @@ sock::Result<sock::StreamSocket> sock::Listener::accept(SocketAddress* peer_addr
   }
 
   if (peer_address) {
-    if (!socket_address_convert_from_raw(socket_address, *peer_address)) {
+    if (!socket_address_convert_from_raw(socket_address, sockaddr_size, *peer_address)) {
       close_socket_if_valid(accepted_socket);
       return {
         .status = {Error::AcceptFailed, Error::AddressConversionFailed},
@@ -1376,13 +1609,36 @@ class PollerImpl : public sock::Poller {
 
   std::vector<RawEntry> raw_entries;
 
-  PollCanceller canceller;
+  std::optional<PollCanceller> canceller;
   std::atomic_bool cancel_pending{false};
 
  public:
-  operator bool() const { return canceller.valid(); }
+  explicit PollerImpl(const CreateParameters& create_parameters) {
+    if (create_parameters.enable_cancellation) {
+      canceller = PollCanceller{};
+    }
+  }
+
+  operator bool() const {
+    if (canceller && !canceller->valid()) {
+      return false;
+    }
+    return true;
+  }
 
   sock::Result<size_t> poll(std::span<PollEntry> entries, int timeout_ms) override {
+    if (entries.empty() && !canceller) {
+      if (timeout_ms > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+      } else if (timeout_ms < 0) {
+        std::this_thread::sleep_for(std::chrono::hours(24));
+      }
+      return {
+        .status = {},
+        .value = 0,
+      };
+    }
+
     raw_entries.resize(entries.size());
 
     for (size_t i = 0; i < entries.size(); i++) {
@@ -1403,20 +1659,22 @@ class PollerImpl : public sock::Poller {
       }
     }
 
-    if (cancel_pending) {
-      if (canceller.drain()) {
-        cancel_pending = false;
-        return {
-          .status = {},
-          .value = {},
-        };
+    if (canceller) {
+      if (cancel_pending) {
+        if (canceller->drain()) {
+          cancel_pending = false;
+          return {
+            .status = {},
+            .value = {},
+          };
+        }
       }
-    }
 
-    raw_entries.push_back({
-      .fd = canceller.cancel_socket(),
-      .events = POLLIN,
-    });
+      raw_entries.push_back({
+        .fd = canceller->cancel_socket(),
+        .events = POLLIN,
+      });
+    }
 
 #if defined(SOCKLIB_WINDOWS)
     const auto poll_result = handle_eintr(
@@ -1434,25 +1692,27 @@ class PollerImpl : public sock::Poller {
 
     auto signaled_entries = size_t(poll_result);
 
-    if (const auto& last = raw_entries[entries.size()]; last.revents) {
-      const bool signaled_input = last.revents & POLLIN;
-      bool cancellation_error = last.revents & (POLLERR | POLLHUP | POLLNVAL);
+    if (canceller) {
+      if (const auto& last = raw_entries[entries.size()]; last.revents) {
+        const bool signaled_input = last.revents & POLLIN;
+        bool cancellation_error = last.revents & (POLLERR | POLLHUP | POLLNVAL);
 
-      if (signaled_input) {
-        if (canceller.drain()) {
-          cancel_pending.store(false);
-        } else {
-          cancellation_error = true;
+        if (signaled_input) {
+          if (canceller->drain()) {
+            cancel_pending.store(false);
+          } else {
+            cancellation_error = true;
+          }
         }
-      }
 
-      if (cancellation_error) {
-        return {
-          .status = sock::Status{sock::Error::PollFailed, sock::Error::CancellationFailed},
-        };
-      }
+        if (cancellation_error) {
+          return {
+            .status = sock::Status{sock::Error::PollFailed, sock::Error::CancellationFailed},
+          };
+        }
 
-      signaled_entries -= 1;
+        signaled_entries -= 1;
+      }
     }
 
     if (signaled_entries > 0) {
@@ -1485,18 +1745,22 @@ class PollerImpl : public sock::Poller {
   }
 
   bool cancel() override {
-    if (!cancel_pending.exchange(true)) {
-      return canceller.signal();
+    if (canceller) {
+      if (!cancel_pending.exchange(true)) {
+        return canceller->signal();
+      }
+      return true;
+    } else {
+      return false;
     }
-    return true;
   }
 };
 
-std::unique_ptr<sock::Poller> sock::Poller::create() {
+std::unique_ptr<sock::Poller> sock::Poller::create(const CreateParameters& create_parameters) {
   if (!initialize_sockets()) {
     return nullptr;
   }
-  auto impl = std::make_unique<PollerImpl>();
+  auto impl = std::make_unique<PollerImpl>(create_parameters);
   if (!*impl) {
     return nullptr;
   }

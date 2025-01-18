@@ -87,6 +87,10 @@ File& File::operator=(File&& other) noexcept {
   return *this;
 }
 
+std::FILE* File::handle() {
+  return fp;
+}
+
 bool File::opened() const {
   return fp != nullptr;
 }

@@ -42,11 +42,8 @@ struct RawSocketAccessor;
 }  // namespace detail
 
 struct IpResolver {
-  static Result<IpV4Address> resolve_ipv4(std::string_view hostname);
-  static Result<IpV6Address> resolve_ipv6(std::string_view hostname);
-
-  static Result<std::vector<IpV4Address>> resolve_ipv4_many(std::string_view hostname);
-  static Result<std::vector<IpV6Address>> resolve_ipv6_many(std::string_view hostname);
+  static Result<std::vector<IpV4Address>> resolve_ipv4(std::string_view hostname);
+  static Result<std::vector<IpV6Address>> resolve_ipv6(std::string_view hostname);
 
   template <typename Ip>
   struct ForIp {};
@@ -54,23 +51,15 @@ struct IpResolver {
 
 template <>
 struct IpResolver::ForIp<IpV4Address> {
-  static Result<IpV4Address> resolve(std::string_view hostname) {
+  static Result<std::vector<IpV4Address>> resolve(std::string_view hostname) {
     return IpResolver::resolve_ipv4(hostname);
-  }
-
-  static Result<std::vector<IpV4Address>> resolve_many(std::string_view hostname) {
-    return IpResolver::resolve_ipv4_many(hostname);
   }
 };
 
 template <>
 struct IpResolver::ForIp<IpV6Address> {
-  static Result<IpV6Address> resolve(std::string_view hostname) {
+  static Result<std::vector<IpV6Address>> resolve(std::string_view hostname) {
     return IpResolver::resolve_ipv6(hostname);
-  }
-
-  static Result<std::vector<IpV6Address>> resolve_many(std::string_view hostname) {
-    return IpResolver::resolve_ipv6_many(hostname);
   }
 };
 
@@ -96,6 +85,8 @@ class Socket {
   bool valid() const;
   operator bool() const { return valid(); }
 
+  SystemError last_error();
+
   Status set_non_blocking(bool non_blocking);
 
   Status local_address(SocketAddress& address) const;
@@ -119,13 +110,15 @@ class RwSocket : public Socket {
   Status set_send_timeout_ms(uint64_t timeout_ms);
   Status set_receive_buffer_size(size_t size);
   Status set_send_buffer_size(size_t size);
-  Status set_broadcast_enabled(bool broadcast_enabled);
 };
 
 }  // namespace detail
 
 class DatagramSocket : public detail::RwSocket {
   using RwSocket::RwSocket;
+
+  Result<size_t> send_to_internal(const SocketAddress* to, const void* data, size_t data_size);
+  Result<size_t> receive_from_internal(SocketAddress* from, void* data, size_t data_size);
 
  public:
   struct BindParameters {
@@ -153,25 +146,49 @@ class DatagramSocket : public detail::RwSocket {
     SocketAddress::Type type,
     const CreateParameters& create_parameters = CreateParameters::default_parameters());
 
-  Result<size_t> send(const SocketAddress& to, const void* data, size_t data_size);
-  Result<size_t> receive(SocketAddress& from, void* data, size_t data_size);
+  struct ConnectParameters {
+    bool non_blocking = false;
 
-  Result<size_t> send(const SocketAddress& to, std::span<const uint8_t> data) {
-    return send(to, data.data(), data.size());
+    constexpr static ConnectParameters default_parameters() { return ConnectParameters{}; }
+  };
+  static Result<DatagramSocket> connect(
+    const SocketAddress& address,
+    const ConnectParameters& connect_parameters = ConnectParameters::default_parameters());
+  static Result<DatagramSocket> connect(
+    IpVersion ip_version,
+    std::string_view hostname,
+    uint16_t port,
+    const ConnectParameters& connect_parameters = ConnectParameters::default_parameters());
+
+  Status set_broadcast_enabled(bool broadcast_enabled);
+
+  Result<size_t> send_to(const SocketAddress& to, const void* data, size_t data_size);
+  Result<size_t> receive_from(SocketAddress& from, void* data, size_t data_size);
+
+  Result<size_t> send(const void* data, size_t data_size);
+  Result<size_t> receive(void* data, size_t data_size);
+
+  Result<size_t> send_to(const SocketAddress& to, std::span<const uint8_t> data) {
+    return send_to(to, data.data(), data.size());
   }
-  Result<size_t> receive(SocketAddress& from, std::span<uint8_t> data) {
-    return receive(from, data.data(), data.size());
+  Result<size_t> receive_from(SocketAddress& from, std::span<uint8_t> data) {
+    return receive_from(from, data.data(), data.size());
   }
+
+  Result<size_t> send(std::span<const uint8_t> data) { return send(data.data(), data.size()); }
+  Result<size_t> receive(std::span<uint8_t> data) { return receive(data.data(), data.size()); }
 };
 
 class StreamSocket : public detail::RwSocket {
   friend class Listener;
-  friend class ConnectingSocket;
+  friend class ConnectingStreamSocket;
 
   using RwSocket::RwSocket;
 
  public:
   struct ConnectParameters {
+    bool non_blocking = false;
+
     constexpr static ConnectParameters default_parameters() { return ConnectParameters{}; }
   };
   static Result<StreamSocket> connect(
@@ -202,17 +219,22 @@ class StreamSocket : public detail::RwSocket {
     return {.status = status, .value = address};
   }
 
-  Status set_no_delay(bool enabled);
+  Status set_keep_alive(bool keep_alive_enabled);
+  Status set_no_delay(bool no_delay_enabled);
 
   Result<size_t> send(const void* data, size_t data_size);
   Result<size_t> send_all(const void* data, size_t data_size);
   Result<size_t> receive(void* data, size_t data_size);
+  Result<size_t> receive_exact(void* data, size_t data_size);
 
   Result<size_t> send(std::span<const uint8_t> data) { return send(data.data(), data.size()); }
   Result<size_t> send_all(std::span<const uint8_t> data) {
     return send_all(data.data(), data.size());
   }
   Result<size_t> receive(std::span<uint8_t> data) { return receive(data.data(), data.size()); }
+  Result<size_t> receive_exact(std::span<uint8_t> data) {
+    return receive_exact(data.data(), data.size());
+  }
 };
 
 namespace detail {
@@ -225,24 +247,24 @@ struct ConnectionSocketPair {
 
 }  // namespace detail
 
-class ConnectingSocket : public Socket {
+class ConnectingStreamSocket : public Socket {
   std::unique_ptr<uint64_t[]> socket_address{};
   size_t socket_address_size{};
 
-  ConnectingSocket(detail::RawSocket raw_socket,
-                   std::unique_ptr<uint64_t[]> socket_address,
-                   size_t socket_address_size);
+  ConnectingStreamSocket(detail::RawSocket raw_socket,
+                         std::unique_ptr<uint64_t[]> socket_address,
+                         size_t socket_address_size);
 
  public:
-  using SocketPair = detail::ConnectionSocketPair<ConnectingSocket>;
+  using SocketPair = detail::ConnectionSocketPair<ConnectingStreamSocket>;
 
-  ConnectingSocket() = default;
+  ConnectingStreamSocket() = default;
 
-  ConnectingSocket(const ConnectingSocket& other) = delete;
-  ConnectingSocket& operator=(const ConnectingSocket& other) = delete;
+  ConnectingStreamSocket(const ConnectingStreamSocket& other) = delete;
+  ConnectingStreamSocket& operator=(const ConnectingStreamSocket& other) = delete;
 
-  ConnectingSocket(ConnectingSocket&& other) noexcept;
-  ConnectingSocket& operator=(ConnectingSocket&& other) noexcept;
+  ConnectingStreamSocket(ConnectingStreamSocket&& other) noexcept;
+  ConnectingStreamSocket& operator=(ConnectingStreamSocket&& other) noexcept;
 
   struct ConnectParameters {
     constexpr static ConnectParameters default_parameters() { return ConnectParameters{}; }
@@ -281,7 +303,14 @@ class Listener : public Socket {
 
 class Poller {
  public:
-  static std::unique_ptr<Poller> create();
+  struct CreateParameters {
+    bool enable_cancellation = false;
+
+    constexpr static CreateParameters default_parameters() { return CreateParameters{}; }
+  };
+
+  static std::unique_ptr<Poller> create(
+    const CreateParameters& create_parameters = CreateParameters::default_parameters());
 
   Poller() = default;
 

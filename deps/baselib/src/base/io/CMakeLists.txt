@@ -5,4 +5,6 @@ target_sources(baselib PRIVATE
     Print.hpp
     TerminalColors.cpp
     TerminalColors.hpp
+    Redirection.cpp
+    Redirection.hpp
 )

@@ -7,8 +7,8 @@ target_sources(baselib PRIVATE
     LoggerImpl.hpp
     Log.cpp
     Log.hpp
-    TerminalLogger.cpp
-    TerminalLogger.hpp
+    StdoutLogger.cpp
+    StdoutLogger.hpp
     FileLogger.cpp
     FileLogger.hpp
 )

@@ -41,6 +41,8 @@ class File {
   File(File&) = delete;
   File& operator=(File&) = delete;
 
+  std::FILE* handle();
+
   operator bool() const { return opened(); }
 
   bool opened() const;

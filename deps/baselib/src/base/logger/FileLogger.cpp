@@ -47,7 +47,7 @@ bool base::FileLogger::try_log(const char* file,
 }
 
 base::FileLogger::FileLogger(const std::string& output_file_path)
-    : FileLogger(File{output_file_path, "w"}) {}
+    : FileLogger(File{output_file_path, "w", base::File::OpenFlags::NoBuffering}) {}
 
 base::FileLogger::FileLogger(File output_file) : output_file(std::move(output_file)) {
   if (!this->output_file) {

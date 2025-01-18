@@ -1,8 +1,10 @@
 #pragma once
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace sock {
 
@@ -77,10 +79,11 @@ class SocketAddress {
   enum class Type {
     IpV4,
     IpV6,
+    Unix,
   };
 
  protected:
-  const Type type_{};
+  const Type type_;
 
   constexpr explicit SocketAddress(Type type) : type_(type) {}
 
@@ -143,6 +146,54 @@ class SocketIpV6Address : public SocketAddress {
 
   std::string stringify() const;
   std::string stringify_v6() const;
+};
+
+class SocketUnixAddress : public SocketAddress {
+ public:
+  enum class Namespace {
+    Filesystem,
+    Abstract,
+  };
+
+#if defined(__linux__)
+  constexpr static bool abstract_namespace_supported = true;
+#else
+  constexpr static bool abstract_namespace_supported = false;
+#endif
+
+  // Minimum value of all supported OSes - 1 char (for abstract namespace or null terminator).
+  constexpr static size_t max_path_size = 103;
+
+ private:
+  using PathBuffer = std::array<char, max_path_size>;
+
+  Namespace socket_namespace_{};
+  PathBuffer path_{};
+  size_t path_size_{};
+
+  SocketUnixAddress(Namespace socket_namespace, std::string_view path);
+
+ public:
+  constexpr SocketUnixAddress() : SocketAddress(Type::Unix) {}
+  constexpr SocketUnixAddress(const SocketUnixAddress& other)
+      : SocketAddress(Type::Unix),
+        socket_namespace_(other.socket_namespace_),
+        path_(other.path_),
+        path_size_(other.path_size_) {}
+
+  static std::optional<SocketUnixAddress> create(Namespace socket_namespace, std::string_view path);
+
+  constexpr SocketUnixAddress& operator=(const SocketUnixAddress& other) {
+    if (this != &other) {
+      this->socket_namespace_ = other.socket_namespace_;
+      this->path_ = other.path_;
+      this->path_size_ = other.path_size_;
+    }
+    return *this;
+  }
+
+  constexpr Namespace socket_namespace() const { return socket_namespace_; }
+  constexpr std::string_view path() const { return {path_.data(), path_size_}; }
 };
 
 }  // namespace sock
