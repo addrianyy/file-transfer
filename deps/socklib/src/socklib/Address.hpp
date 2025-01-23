@@ -28,6 +28,8 @@ class IpV4Address {
   constexpr explicit IpV4Address(uint8_t a, uint8_t b, uint8_t c, uint8_t d)
       : components_({a, b, c, d}) {}
 
+  auto operator<=>(const IpV4Address&) const = default;
+
   constexpr std::array<uint8_t, 4> components() const { return components_; }
 
   std::string stringify() const;
@@ -50,6 +52,8 @@ class IpV6Address {
 
   constexpr explicit IpV6Address() = default;
   constexpr explicit IpV6Address(std::array<uint16_t, 8> components) : components_(components) {}
+
+  auto operator<=>(const IpV6Address&) const = default;
 
   constexpr bool is_mapped_to_ipv4() const {
     const auto& c = components_;
